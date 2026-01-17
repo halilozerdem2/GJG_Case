@@ -12,36 +12,42 @@ public class Block : MonoBehaviour
     [SerializeField] private Sprite tierOneIcon;
     [SerializeField] private Sprite tierTwoIcon;
     [SerializeField] private Sprite tierThreeIcon;
+    [SerializeField] private Vector3 baseLocalScale = Vector3.one;
 
     private void Awake()
     {
-        if (spriteRenderer == null)
-        {
-            spriteRenderer = GetComponent<SpriteRenderer>();
-        }
+        CacheRendererAndScale();
     }
 
 #if UNITY_EDITOR
     private void OnValidate()
     {
-        if (spriteRenderer == null)
-        {
-            spriteRenderer = GetComponent<SpriteRenderer>();
-        }
-
+        CacheRendererAndScale();
         if (spriteRenderer != null && defaultIcon == null)
         {
             defaultIcon = spriteRenderer.sprite;
         }
+
+        if (!Application.isPlaying)
+        {
+            baseLocalScale = transform.localScale;
+        }
     }
 #endif
 
-    public void SetBlock(Node aNode)
+    public void SetBlock(Node aNode, bool preserveWorldPosition = false)
     {
         if (node != null) node.OccupiedBlock = null;
         node = aNode;
         node.OccupiedBlock = this;
-        transform.SetParent(node.transform);
+        transform.SetParent(node.transform, preserveWorldPosition);
+        transform.localRotation = Quaternion.identity;
+        transform.localScale = baseLocalScale;
+
+        if (!preserveWorldPosition)
+        {
+            transform.localPosition = Vector3.zero;
+        }
     }
 
     public HashSet<Block> FloodFill()
@@ -101,5 +107,18 @@ public class Block : MonoBehaviour
         }
 
         GameManager.Instance.TryBlastBlock(this);
+    }
+
+    private void CacheRendererAndScale()
+    {
+        if (spriteRenderer == null)
+        {
+            spriteRenderer = GetComponent<SpriteRenderer>();
+        }
+
+        if (baseLocalScale == Vector3.zero)
+        {
+            baseLocalScale = transform.localScale == Vector3.zero ? Vector3.one : transform.localScale;
+        }
     }
 }
