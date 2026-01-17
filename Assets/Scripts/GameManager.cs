@@ -16,6 +16,14 @@ public class GameManager : MonoBehaviour
     [SerializeField] private Block[] blockTypes;
     [SerializeField] private SpriteRenderer _boardPrefab;
 
+    private static readonly Vector2Int[] CardinalDirections =
+    {
+        Vector2Int.up,
+        Vector2Int.down,
+        Vector2Int.left,
+        Vector2Int.right
+    };
+
     private Dictionary<Vector2Int, Node> _nodes;
     private List<Block> _blocks;
     private HashSet<Node> freeNodes; // Boş olan düğümleri takip eden liste
@@ -110,19 +118,10 @@ public class GameManager : MonoBehaviour
             randomBlock.transform.DOMove(node.Pos, 0.3f).SetEase(Ease.OutBounce);
         }
 
-        FindAllNeighbours();
         ChangeState(GameState.WaitingInput);
     }
 
 
-
-    private void FindAllNeighbours()
-    {
-        foreach (var block in _blocks)
-        {
-            block.FindNeighbours(_nodes.Values.ToList());
-        }
-    }
 
     public void TryBlastBlock(Block block)
     {
@@ -139,8 +138,28 @@ public class GameManager : MonoBehaviour
 
                 Destroy(b.gameObject);
             }
-            FindAllNeighbours();
             ChangeState(GameState.Blasting);
+        }
+    }
+
+    public IEnumerable<Block> GetMatchingNeighbours(Block block)
+    {
+        if (block == null || block.node == null)
+        {
+            yield break;
+        }
+
+        foreach (var dir in CardinalDirections)
+        {
+            Vector2Int neighbourPosition = block.node.gridPosition + dir;
+            if (_nodes.TryGetValue(neighbourPosition, out Node neighbourNode))
+            {
+                Block neighbourBlock = neighbourNode.OccupiedBlock;
+                if (neighbourBlock != null && neighbourBlock.blockType == block.blockType)
+                {
+                    yield return neighbourBlock;
+                }
+            }
         }
     }
 
