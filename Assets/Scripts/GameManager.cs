@@ -9,11 +9,8 @@ using System.Collections;
 public class GameManager : MonoBehaviour
 {
     public static GameManager Instance;
-    [SerializeField] private int _width = 5;
-    [SerializeField] private int _height = 7;
-
+    [SerializeField] private BoardSettings boardSettings;
     [SerializeField] private Node _nodePrefab;
-    [SerializeField] private Block[] blockTypes;
     [SerializeField] private SpriteRenderer _boardPrefab;
 
     private static readonly Vector2Int[] CardinalDirections =
@@ -25,8 +22,8 @@ public class GameManager : MonoBehaviour
     };
 
     private Dictionary<Vector2Int, Node> _nodes;
-    private List<Block> _blocks;
     private HashSet<Node> freeNodes; // Boş olan düğümleri takip eden liste
+    private bool settingsReady;
 
     private GameState _state;
 
@@ -34,20 +31,38 @@ public class GameManager : MonoBehaviour
     {
         Instance = this;
         _nodes = new Dictionary<Vector2Int, Node>();
-        _blocks = new List<Block>();
         freeNodes = new HashSet<Node>(); // Boş düğümler burada saklanacak
+
+        if (boardSettings == null)
+        {
+            Debug.LogError("BoardSettings reference is missing on GameManager.");
+        }
+        else if (!boardSettings.IsValid(out string validationMessage))
+        {
+            Debug.LogError($"Invalid BoardSettings: {validationMessage}");
+        }
+        else
+        {
+            settingsReady = true;
+        }
     }
 
     private void Start()
     {
+        if (!settingsReady)
+        {
+            enabled = false;
+            return;
+        }
+
         ChangeState(GameState.GenerateLevel);
     }
 
     void GenerateGrid()
     {
-        for (int x = 0; x < _width; x++)
+        for (int x = 0; x < boardSettings.Columns; x++)
         {
-            for (int y = 0; y < _height; y++)
+            for (int y = 0; y < boardSettings.Rows; y++)
             {
                 var node = Instantiate(_nodePrefab, new Vector3(x, y), Quaternion.identity);
                 node.gridPosition = new Vector2Int(x, y);
@@ -57,9 +72,9 @@ public class GameManager : MonoBehaviour
             }
         }
 
-        var center = new Vector2((float)_width / 2 - 0.5f, (float)_height / 2 - 0.5f);
+        var center = new Vector2((float)boardSettings.Columns / 2 - 0.5f, (float)boardSettings.Rows / 2 - 0.5f);
         var board = Instantiate(_boardPrefab, center, Quaternion.identity);
-        board.size = new Vector2(_width, _height);
+        board.size = new Vector2(boardSettings.Columns, boardSettings.Rows);
 
         Camera.main.transform.position = new Vector3(center.x, center.y, -10);
         ChangeState(GameState.SpawningBlocks);
@@ -107,11 +122,10 @@ public class GameManager : MonoBehaviour
         foreach (var node in nodesToFill)
         {
             // Blokları üstten (örneğin _height + 1 seviyesinden) spawn et
-            Vector3 spawnPos = new Vector3(node.Pos.x, _height + 1, 0);
-            Block randomBlock = Instantiate(blockTypes[Random.Range(0, blockTypes.Length)], spawnPos, Quaternion.identity);
+            Vector3 spawnPos = new Vector3(node.Pos.x, boardSettings.Rows + 1, 0);
+            Block randomBlock = Instantiate(boardSettings.BlockPrefabs[Random.Range(0, boardSettings.BlockPrefabs.Length)], spawnPos, Quaternion.identity);
 
             randomBlock.SetBlock(node);
-            _blocks.Add(randomBlock);
             freeNodes.Remove(node); // Artık dolu, freeNodes listesinden çıkar
 
             // Animasyonlu düşme efekti
@@ -165,14 +179,14 @@ public class GameManager : MonoBehaviour
 
     public void UpdateGrid() // O(n^3) karmaşıklığındaki yapı dicitonary kullanılarak               
     {                        // O(n^2 Log N) seviyesine düşürülecek
-        for (int x = 0; x < _width; x++)
+        for (int x = 0; x < boardSettings.Columns; x++)
         {
-            for (int y = 0; y < _height; y++)
+            for (int y = 0; y < boardSettings.Rows; y++)
             {
                 Node currentNode = _nodes.FirstOrDefault(n => n.Key.x == x && n.Key.y == y).Value;
                 if (currentNode == null || currentNode.OccupiedBlock != null) continue;
 
-                for (int k = y + 1; k < _height; k++)
+                for (int k = y + 1; k < boardSettings.Rows; k++)
                 {
                     Node upperNode = _nodes.FirstOrDefault(n => n.Key.x == x && n.Key.y == k).Value;
                     if (upperNode == null) continue;

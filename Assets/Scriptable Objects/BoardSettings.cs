@@ -1,0 +1,97 @@
+using System;
+using UnityEngine;
+
+[CreateAssetMenu(fileName = "BoardSettings", menuName = "Scriptable Objects/BoardSettings")]
+public class BoardSettings : ScriptableObject
+{
+    private const int MinSize = 2;
+    private const int MaxSize = 10;
+    private const int MinColorCount = 1;
+    private const int MaxColorCount = 6;
+
+    [Header("Board Dimensions")]
+    [SerializeField, Range(MinSize, MaxSize)] private int rows = 7;
+    [SerializeField, Range(MinSize, MaxSize)] private int columns = 5;
+
+    [Header("Block Variations")]
+    [SerializeField, Range(MinColorCount, MaxColorCount)] private int colors = 5;
+    [SerializeField] private Block[] blockPrefabs;
+
+    [Header("Group Size Thresholds")]
+    [SerializeField, Min(2)] private int thresholdA = 4;
+    [SerializeField, Min(3)] private int thresholdB = 7;
+    [SerializeField, Min(4)] private int thresholdC = 9;
+
+    public int Rows => rows;
+    public int Columns => columns;
+    public int Colors => colors;
+    public int ThresholdA => thresholdA;
+    public int ThresholdB => thresholdB;
+    public int ThresholdC => thresholdC;
+    public Block[] BlockPrefabs => blockPrefabs;
+
+    public bool IsValid(out string message)
+    {
+        if (rows < MinSize || rows > MaxSize)
+        {
+            message = $"Rows must stay within [{MinSize}, {MaxSize}].";
+            return false;
+        }
+
+        if (columns < MinSize || columns > MaxSize)
+        {
+            message = $"Columns must stay within [{MinSize}, {MaxSize}].";
+            return false;
+        }
+
+        if (colors < MinColorCount || colors > MaxColorCount)
+        {
+            message = $"Color count must stay within [{MinColorCount}, {MaxColorCount}].";
+            return false;
+        }
+
+        if (!(thresholdA < thresholdB && thresholdB < thresholdC))
+        {
+            message = "Thresholds must satisfy A < B < C.";
+            return false;
+        }
+
+        if (blockPrefabs == null || blockPrefabs.Length != colors)
+        {
+            message = "Block prefab array length must match color count.";
+            return false;
+        }
+
+        for (int i = 0; i < blockPrefabs.Length; i++)
+        {
+            if (blockPrefabs[i] == null)
+            {
+                message = $"Block prefab at index {i} is missing.";
+                return false;
+            }
+        }
+
+        message = string.Empty;
+        return true;
+    }
+
+#if UNITY_EDITOR
+    private void OnValidate()
+    {
+        rows = Mathf.Clamp(rows, MinSize, MaxSize);
+        columns = Mathf.Clamp(columns, MinSize, MaxSize);
+        colors = Mathf.Clamp(colors, MinColorCount, MaxColorCount);
+
+        thresholdA = Mathf.Max(2, thresholdA);
+        thresholdB = Mathf.Max(thresholdA + 1, thresholdB);
+        thresholdC = Mathf.Max(thresholdB + 1, thresholdC);
+
+        if (blockPrefabs == null) return;
+
+        if (blockPrefabs.Length != colors)
+        {
+            Array.Resize(ref blockPrefabs, colors);
+        }
+    }
+#endif
+}
