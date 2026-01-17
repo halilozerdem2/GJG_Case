@@ -16,6 +16,8 @@ public class BoardSettings : ScriptableObject
     [Header("Block Variations")]
     [SerializeField, Range(MinColorCount, MaxColorCount)] private int colors = 5;
     [SerializeField] private Block[] blockPrefabs;
+    [Header("VFX")]
+    [SerializeField] private ParticleSystem[] blastEffectPrefabs;
 
     [Header("Group Size Thresholds")]
     [SerializeField, Min(2)] private int thresholdA = 4;
@@ -29,6 +31,7 @@ public class BoardSettings : ScriptableObject
     public int ThresholdB => thresholdB;
     public int ThresholdC => thresholdC;
     public Block[] BlockPrefabs => blockPrefabs;
+    public ParticleSystem[] BlastEffectPrefabs => blastEffectPrefabs;
 
     public bool IsValid(out string message)
     {
@@ -71,8 +74,48 @@ public class BoardSettings : ScriptableObject
             }
         }
 
+        if (blastEffectPrefabs == null || blastEffectPrefabs.Length != colors)
+        {
+            message = "Blast effect array length must match color count.";
+            return false;
+        }
+
+        for (int i = 0; i < blastEffectPrefabs.Length; i++)
+        {
+            if (blastEffectPrefabs[i] == null)
+            {
+                message = $"Blast effect prefab at index {i} is missing.";
+                return false;
+            }
+        }
+
         message = string.Empty;
         return true;
+    }
+
+    public ParticleSystem GetBlastEffectPrefab(int blockType)
+    {
+        if (blockPrefabs == null || blastEffectPrefabs == null)
+        {
+            return null;
+        }
+
+        int count = Mathf.Min(blockPrefabs.Length, blastEffectPrefabs.Length);
+        for (int i = 0; i < count; i++)
+        {
+            Block prefab = blockPrefabs[i];
+            if (prefab == null)
+            {
+                continue;
+            }
+
+            if (prefab.blockType == blockType)
+            {
+                return blastEffectPrefabs[i];
+            }
+        }
+
+        return null;
     }
 
 #if UNITY_EDITOR
@@ -91,6 +134,11 @@ public class BoardSettings : ScriptableObject
         if (blockPrefabs.Length != colors)
         {
             Array.Resize(ref blockPrefabs, colors);
+        }
+
+        if (blastEffectPrefabs == null || blastEffectPrefabs.Length != colors)
+        {
+            Array.Resize(ref blastEffectPrefabs, colors);
         }
     }
 #endif

@@ -1,10 +1,10 @@
 fileFormatVersion: 2
-guid: 52bad819b3d32414aa353b1571e25cfc
+guid: f9ebc228269ee406e84f0f975c6dd31b
 TextureImporter:
   internalIDToNameTable:
   - first:
-      213: 5287778815849618955
-    second: ChatGPT Image 17 Oca 2026 00_18_43_0
+      213: -5363712094673921063
+    second: purpleStone_0
   externalObjects: {}
   serializedVersion: 13
   mipmaps:
@@ -126,13 +126,13 @@ TextureImporter:
     serializedVersion: 2
     sprites:
     - serializedVersion: 2
-      name: ChatGPT Image 17 Oca 2026 00_18_43_0
+      name: purpleStone_0
       rect:
         serializedVersion: 2
-        x: 0
-        y: 0
-        width: 1024
-        height: 1536
+        x: 43
+        y: 32
+        width: 426
+        height: 430
       alignment: 0
       pivot: {x: 0, y: 0}
       border: {x: 0, y: 0, z: 0, w: 0}
@@ -141,8 +141,8 @@ TextureImporter:
       physicsShape: []
       tessellationDetail: -1
       bones: []
-      spriteID: b0e5d8131d6f16940800000000000000
-      internalID: 5287778815849618955
+      spriteID: 9db9e7f94444095b0800000000000000
+      internalID: -5363712094673921063
       vertices: []
       indices: 
       edges: []
@@ -161,7 +161,7 @@ TextureImporter:
     spriteCustomMetadata:
       entries: []
     nameFileIdTable:
-      ChatGPT Image 17 Oca 2026 00_18_43_0: 5287778815849618955
+      purpleStone_0: -5363712094673921063
   mipmapLimitGroupName: 
   pSDRemoveMatte: 0
   userData: 

@@ -40,6 +40,7 @@ public class GameManager : MonoBehaviour
     private Vector3 boardBaseScale = Vector3.one;
     private Vector2 boardEnvelopeSize;
     private Transform gridRoot;
+    private Transform blastEffectRoot;
     private bool settingsReady;
     private bool isValidMoveExist;
     private int shuffleTweensPending;
@@ -209,6 +210,7 @@ public class GameManager : MonoBehaviour
                     freeNodes.Add(b.node); // Boşalan düğümü freeNodes'a ekle
                 }
 
+                PlayBlockBlastEffect(b);
                 ReleaseBlock(b);
                 blockGroups.Remove(b);
             }
@@ -392,6 +394,45 @@ public class GameManager : MonoBehaviour
     private Vector3 GetGridCenter()
     {
         return gridWorldCenter;
+    }
+
+    private Transform GetBlastEffectRoot()
+    {
+        if (blastEffectRoot == null)
+        {
+            GameObject effectsContainer = new GameObject("BlastEffects");
+            blastEffectRoot = effectsContainer.transform;
+            blastEffectRoot.SetParent(transform);
+        }
+
+        return blastEffectRoot;
+    }
+
+    private void PlayBlockBlastEffect(Block block)
+    {
+        if (block == null || boardSettings == null)
+        {
+            return;
+        }
+
+        ParticleSystem effectPrefab = boardSettings.GetBlastEffectPrefab(block.blockType);
+        if (effectPrefab == null)
+        {
+            return;
+        }
+
+        Vector3 spawnPosition = block.transform.position;
+        ParticleSystem instance = Instantiate(effectPrefab, spawnPosition, Quaternion.identity, GetBlastEffectRoot());
+        instance.Play();
+
+        var mainModule = instance.main;
+        float lifetime = mainModule.duration;
+        if (!mainModule.loop)
+        {
+            lifetime += mainModule.startLifetime.constantMax;
+        }
+
+        Destroy(instance.gameObject, Mathf.Max(0.1f, lifetime));
     }
 
     private void FitBoardToScreen()

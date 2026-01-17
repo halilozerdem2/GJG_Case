@@ -22,6 +22,13 @@ MonoBehaviour:
   - {fileID: -5895060408168343372, guid: 699255edc357647359d756139bac7ba3, type: 3}
   - {fileID: -5616091948119221040, guid: 2bda851c67d664611be2044a3a1c655f, type: 3}
   - {fileID: 6117569212860040427, guid: e29d17fbbf32f444ab01ac13b0e25818, type: 3}
+  blastEffectPrefabs:
+  - {fileID: 3788187274286152095, guid: 92dcc53305e474ff7b71822eb9c808c2, type: 3}
+  - {fileID: 3788187274286152095, guid: 996402487b9c34713bc37d42fd501685, type: 3}
+  - {fileID: 3788187274286152095, guid: 84827aa13d40045c9899d90d373063bf, type: 3}
+  - {fileID: 3788187274286152095, guid: a972e7d86e60f496083c6e2a0aaf78e3, type: 3}
+  - {fileID: 3788187274286152095, guid: 377bff47e09e04f689aacf36e94c5119, type: 3}
+  - {fileID: 3788187274286152095, guid: 04ebf5eb2193f49a2bb5ad771d8025c5, type: 3}
   thresholdA: 3
   thresholdB: 5
   thresholdC: 7
