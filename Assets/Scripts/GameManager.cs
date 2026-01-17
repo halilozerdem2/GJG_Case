@@ -36,6 +36,7 @@ public class GameManager : MonoBehaviour
     private bool isValidMoveExist;
     private int shuffleTweensPending;
     private bool shuffleResolutionPending;
+    private readonly Dictionary<Block, HashSet<Block>> blockGroups = new Dictionary<Block, HashSet<Block>>();
 
     private GameState _state;
 
@@ -172,7 +173,20 @@ public class GameManager : MonoBehaviour
 
     public void TryBlastBlock(Block block)
     {
-        HashSet<Block> group = block.FloodFill();
+        if (!IsWaitingForInput)
+        {
+            return;
+        }
+
+        if (!blockGroups.TryGetValue(block, out HashSet<Block> group))
+        {
+            Debug.Log("FloodFill recalculated for block " + block.name);
+            group = block.FloodFill();
+        }
+        else
+        {
+            Debug.Log("FloodFill cache hit for block " + block.name);
+        }
         if (group.Count >= 2)
         {
             foreach (var b in group)
@@ -184,6 +198,7 @@ public class GameManager : MonoBehaviour
                 }
 
                 Destroy(b.gameObject);
+                blockGroups.Remove(b);
             }
             ChangeState(GameState.Falling);
         }
@@ -217,6 +232,7 @@ public class GameManager : MonoBehaviour
             return;
         }
 
+        blockGroups.Clear();
         isValidMoveExist = false;
         HashSet<Block> processed = new HashSet<Block>();
         foreach (var node in _nodes.Values)
@@ -226,6 +242,11 @@ public class GameManager : MonoBehaviour
 
             HashSet<Block> group = block.FloodFill();
             int groupSize = group.Count;
+            Debug.Log($"Caching group of size {groupSize} for seed {block.name}");
+            foreach (var member in group)
+            {
+                blockGroups[member] = group;
+            }
             if (groupSize >= 2)
             {
                 isValidMoveExist = true;
@@ -368,7 +389,7 @@ public class GameManager : MonoBehaviour
         for (int x = 0; x < boardSettings.Columns; x++)
         {
             for (int y = 0; y < boardSettings.Rows; y++)
-            {
+                {
                 Vector2Int currentKey = new Vector2Int(x, y);
                 if (!_nodes.TryGetValue(currentKey, out Node currentNode) || currentNode.OccupiedBlock != null)
                 {
@@ -532,6 +553,7 @@ public class GameManager : MonoBehaviour
 
         return true;
     }
+
 
     private int GetColorWithPair(Dictionary<int, List<Node>> colorNodes)
     {

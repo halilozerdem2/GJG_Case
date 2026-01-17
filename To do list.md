@@ -15,7 +15,7 @@
   - Implement a deterministic shuffle that preserves column counts and only performs swaps that introduce at least one valid group (no random retries without checks).
   - Integrate the shuffle into the `GameState` flow so the board never stays in a deadlocked “WaitingInput” state.
 
-- [ ] **Flood-Fill Result Reuse**
+- [x] **Flood-Fill Result Reuse**
   - Refactor flood fill to return both the visited set and the group size per block.
   - Cache these results long enough to drive the icon updates and deadlock checks, avoiding duplicate DFS/BFS passes in a single frame.
 
