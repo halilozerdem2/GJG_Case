@@ -5,6 +5,7 @@ using DG.Tweening;
 using System;
 using Random = UnityEngine.Random;
 using System.Collections;
+using Unity.Profiling;
 
 public class GameManager : MonoBehaviour
 {
@@ -26,6 +27,9 @@ public class GameManager : MonoBehaviour
         Vector2Int.left,
         Vector2Int.right
     };
+    private static readonly ProfilerMarker FallingMarker = new ProfilerMarker("GameManager.HandleFallingState");
+    private static readonly ProfilerMarker SpawnBlocksMarker = new ProfilerMarker("GameManager.SpawnBlocksCoroutine");
+    private static readonly ProfilerMarker ShuffleMarker = new ProfilerMarker("GameManager.TryShuffleBoard");
 
     private Dictionary<Vector2Int, Node> _nodes;
     private HashSet<Node> freeNodes; // Boş olan düğümleri takip eden liste
@@ -145,36 +149,39 @@ public class GameManager : MonoBehaviour
     {
         yield return new WaitForSeconds(0.2f); // Bloklar düştükten sonra 0.2 saniye bekle
 
-        UpdateFreeNodes();
-        List<Node> nodesToFill = freeNodes.ToList(); // Şu anda boş olan düğümleri listeye al
-        float dropDuration = Mathf.Max(0f, blockDropDuration);
-
-        foreach (var node in nodesToFill)
+        using (SpawnBlocksMarker.Auto())
         {
-            Block prefab = boardSettings.BlockPrefabs[Random.Range(0, boardSettings.BlockPrefabs.Length)];
-            Block randomBlock = SpawnBlockFromPool(prefab.blockType, node.transform);
-            if (randomBlock == null)
+            UpdateFreeNodes();
+            List<Node> nodesToFill = freeNodes.ToList(); // Şu anda boş olan düğümleri listeye al
+            float dropDuration = Mathf.Max(0f, blockDropDuration);
+
+            foreach (var node in nodesToFill)
             {
-                continue;
+                Block prefab = boardSettings.BlockPrefabs[Random.Range(0, boardSettings.BlockPrefabs.Length)];
+                Block randomBlock = SpawnBlockFromPool(prefab.blockType, node.transform);
+                if (randomBlock == null)
+                {
+                    continue;
+                }
+
+                randomBlock.SetBlock(node);
+                float dropOffset = GetSpawnOffsetForRow(node.gridPosition.y);
+                randomBlock.transform.localPosition = Vector3.up * dropOffset;
+                freeNodes.Remove(node); // Artık dolu, freeNodes listesinden çıkar
+
+                if (dropDuration > 0f)
+                {
+                    randomBlock.transform.DOLocalMove(Vector3.zero, dropDuration).SetEase(Ease.OutBounce);
+                }
+                else
+                {
+                    randomBlock.transform.localPosition = Vector3.zero;
+                }
             }
 
-            randomBlock.SetBlock(node);
-            float dropOffset = GetSpawnOffsetForRow(node.gridPosition.y);
-            randomBlock.transform.localPosition = Vector3.up * dropOffset;
-            freeNodes.Remove(node); // Artık dolu, freeNodes listesinden çıkar
-
-            if (dropDuration > 0f)
-            {
-                randomBlock.transform.DOLocalMove(Vector3.zero, dropDuration).SetEase(Ease.OutBounce);
-            }
-            else
-            {
-                randomBlock.transform.localPosition = Vector3.zero;
-            }
+            RefreshGroupVisuals();
+            ChangeState(isValidMoveExist ? GameState.WaitingInput : GameState.Deadlock);
         }
-
-        RefreshGroupVisuals();
-        ChangeState(isValidMoveExist ? GameState.WaitingInput : GameState.Deadlock);
     }
 
 
@@ -188,12 +195,7 @@ public class GameManager : MonoBehaviour
 
         if (!blockGroups.TryGetValue(block, out HashSet<Block> group))
         {
-            Debug.Log("FloodFill recalculated for block " + block.name);
             group = block.FloodFill();
-        }
-        else
-        {
-            Debug.Log("FloodFill cache hit for block " + block.name);
         }
         if (group.Count >= 2)
         {
@@ -250,7 +252,6 @@ public class GameManager : MonoBehaviour
 
             HashSet<Block> group = block.FloodFill();
             int groupSize = group.Count;
-            Debug.Log($"Caching group of size {groupSize} for seed {block.name}");
             foreach (var member in group)
             {
                 blockGroups[member] = group;
@@ -301,8 +302,8 @@ public class GameManager : MonoBehaviour
         }
 
         blockPool.transform.SetParent(transform);
-        int capacityPerType = Mathf.Max(1, boardSettings.Rows * boardSettings.Columns);
-        blockPool.Initialize(boardSettings.BlockPrefabs, capacityPerType);
+        int totalCells = Mathf.Max(1, boardSettings.Rows * boardSettings.Columns);
+        blockPool.Initialize(boardSettings.BlockPrefabs, totalCells, 1.2f);
     }
 
     private Block SpawnBlockFromPool(int blockType, Transform parent)
@@ -434,47 +435,50 @@ public class GameManager : MonoBehaviour
 
     private void HandleFallingState() // O(n^3) karmaşıklığındaki yapı dicitonary kullanılarak               
     {                                  // O(n^2 Log N) seviyesine düşürülecek
-        float dropDuration = Mathf.Max(0f, blockDropDuration);
-        for (int x = 0; x < boardSettings.Columns; x++)
+        using (FallingMarker.Auto())
         {
-            int writeIndex = 0;
-            for (int y = 0; y < boardSettings.Rows; y++)
+            float dropDuration = Mathf.Max(0f, blockDropDuration);
+            for (int x = 0; x < boardSettings.Columns; x++)
             {
-                Node currentNode = nodeGrid[x, y];
-                if (currentNode == null)
+                int writeIndex = 0;
+                for (int y = 0; y < boardSettings.Rows; y++)
                 {
-                    continue;
-                }
-
-                Block block = currentNode.OccupiedBlock;
-                if (block != null)
-                {
-                    if (y != writeIndex)
+                    Node currentNode = nodeGrid[x, y];
+                    if (currentNode == null)
                     {
-                        Node targetNode = nodeGrid[x, writeIndex];
-                        block.SetBlock(targetNode, true);
-                        if (dropDuration > 0f)
-                        {
-                            block.transform.DOLocalMove(Vector3.zero, dropDuration).SetEase(Ease.OutBounce);
-                        }
-                        else
-                        {
-                            block.transform.localPosition = Vector3.zero;
-                        }
-
-                        targetNode.OccupiedBlock = block;
-                        currentNode.OccupiedBlock = null;
-                        freeNodes.Add(currentNode);
-                        freeNodes.Remove(targetNode);
+                        continue;
                     }
 
-                    writeIndex++;
+                    Block block = currentNode.OccupiedBlock;
+                    if (block != null)
+                    {
+                        if (y != writeIndex)
+                        {
+                            Node targetNode = nodeGrid[x, writeIndex];
+                            block.SetBlock(targetNode, true);
+                            if (dropDuration > 0f)
+                            {
+                                block.transform.DOLocalMove(Vector3.zero, dropDuration).SetEase(Ease.OutBounce);
+                            }
+                            else
+                            {
+                                block.transform.localPosition = Vector3.zero;
+                            }
+
+                            targetNode.OccupiedBlock = block;
+                            currentNode.OccupiedBlock = null;
+                            freeNodes.Add(currentNode);
+                            freeNodes.Remove(targetNode);
+                        }
+
+                        writeIndex++;
+                    }
                 }
             }
+            UpdateFreeNodes();
+            RefreshGroupVisuals();
+            ChangeState(GameState.SpawningBlocks);
         }
-        UpdateFreeNodes();
-        RefreshGroupVisuals();
-        ChangeState(GameState.SpawningBlocks);
     }
 
     private void HandleDeadlockState()
@@ -504,6 +508,8 @@ public class GameManager : MonoBehaviour
 
     private bool TryShuffleBoard()
     {
+        using (ShuffleMarker.Auto())
+        {
         if (_nodes == null || _nodes.Count == 0)
         {
             return false;
@@ -603,6 +609,7 @@ public class GameManager : MonoBehaviour
         }
 
         return true;
+        }
     }
 
 

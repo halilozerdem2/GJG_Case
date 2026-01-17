@@ -27,11 +27,17 @@ public class ObjectPool : MonoBehaviour
         DontDestroyOnLoad(gameObject);
     }
 
-    public void Initialize(Block[] prefabs, int sizePerPrefab)
+    public void Initialize(Block[] prefabs, int totalCells, float bufferMultiplier = 1.2f)
     {
         pools.Clear();
         prefabLookup.Clear();
 
+        if (prefabs == null || prefabs.Length == 0)
+        {
+            return;
+        }
+
+        List<Block> uniquePrefabs = new List<Block>();
         foreach (var prefab in prefabs)
         {
             if (prefab == null)
@@ -46,14 +52,28 @@ public class ObjectPool : MonoBehaviour
             }
 
             prefabLookup[blockType] = prefab;
-            Queue<Block> queue = new Queue<Block>(sizePerPrefab);
-            for (int i = 0; i < sizePerPrefab; i++)
+            uniquePrefabs.Add(prefab);
+        }
+
+        if (uniquePrefabs.Count == 0)
+        {
+            return;
+        }
+
+        float multiplier = Mathf.Max(1f, bufferMultiplier);
+        int totalNeeded = Mathf.Max(1, Mathf.CeilToInt(totalCells * multiplier));
+        int perType = Mathf.Max(1, Mathf.CeilToInt((float)totalNeeded / uniquePrefabs.Count));
+
+        foreach (var prefab in uniquePrefabs)
+        {
+            Queue<Block> queue = new Queue<Block>(perType);
+            for (int i = 0; i < perType; i++)
             {
                 Block instance = Instantiate(prefab, inactiveParent);
                 instance.gameObject.SetActive(false);
                 queue.Enqueue(instance);
             }
-            pools[blockType] = queue;
+            pools[prefab.blockType] = queue;
         }
     }
 
