@@ -28,6 +28,7 @@ public class GameManager : MonoBehaviour
 
     private Dictionary<Vector2Int, Node> _nodes;
     private HashSet<Node> freeNodes; // Boş olan düğümleri takip eden liste
+    private Node[,] nodeGrid;
     private GameObject boardInstance;
     private Vector3 boardBaseScale = Vector3.one;
     private Vector2 boardEnvelopeSize;
@@ -45,6 +46,7 @@ public class GameManager : MonoBehaviour
         Instance = this;
         _nodes = new Dictionary<Vector2Int, Node>();
         freeNodes = new HashSet<Node>(); // Boş düğümler burada saklanacak
+        nodeGrid = new Node[boardSettings.Columns, boardSettings.Rows];
 
         if (boardSettings == null)
         {
@@ -93,6 +95,7 @@ public class GameManager : MonoBehaviour
 
                 node.gridPosition = new Vector2Int(x, y);
                 _nodes[node.gridPosition] = node;
+                nodeGrid[x, y] = node;
                 freeNodes.Add(node); // Başlangıçta tüm düğümler boş olacak
             }
         }
@@ -388,36 +391,38 @@ public class GameManager : MonoBehaviour
         float dropDuration = Mathf.Max(0f, blockDropDuration);
         for (int x = 0; x < boardSettings.Columns; x++)
         {
+            int writeIndex = 0;
             for (int y = 0; y < boardSettings.Rows; y++)
-                {
-                Vector2Int currentKey = new Vector2Int(x, y);
-                if (!_nodes.TryGetValue(currentKey, out Node currentNode) || currentNode.OccupiedBlock != null)
+            {
+                Node currentNode = nodeGrid[x, y];
+                if (currentNode == null)
                 {
                     continue;
                 }
 
-                for (int k = y + 1; k < boardSettings.Rows; k++)
+                Block block = currentNode.OccupiedBlock;
+                if (block != null)
                 {
-                    Vector2Int upperKey = new Vector2Int(x, k);
-                    if (!_nodes.TryGetValue(upperKey, out Node upperNode) || upperNode.OccupiedBlock == null)
+                    if (y != writeIndex)
                     {
-                        continue;
+                        Node targetNode = nodeGrid[x, writeIndex];
+                        block.SetBlock(targetNode, true);
+                        if (dropDuration > 0f)
+                        {
+                            block.transform.DOLocalMove(Vector3.zero, dropDuration).SetEase(Ease.OutBounce);
+                        }
+                        else
+                        {
+                            block.transform.localPosition = Vector3.zero;
+                        }
+
+                        targetNode.OccupiedBlock = block;
+                        currentNode.OccupiedBlock = null;
+                        freeNodes.Add(currentNode);
+                        freeNodes.Remove(targetNode);
                     }
 
-                    Block blockToMove = upperNode.OccupiedBlock;
-                    blockToMove.SetBlock(currentNode, true);
-                    if (dropDuration > 0f)
-                    {
-                        blockToMove.transform.DOLocalMove(Vector3.zero, dropDuration).SetEase(Ease.OutBounce);
-                    }
-                    else
-                    {
-                        blockToMove.transform.localPosition = Vector3.zero;
-                    }
-
-                    freeNodes.Add(upperNode);
-                    freeNodes.Remove(currentNode);
-                    break;
+                    writeIndex++;
                 }
             }
         }
@@ -459,7 +464,7 @@ public class GameManager : MonoBehaviour
         }
 
         Dictionary<int, List<Node>> colorNodes = new Dictionary<int, List<Node>>();
-        foreach (Node node in _nodes.Values)
+        foreach (Node node in nodeGrid)
         {
             if (node?.OccupiedBlock == null)
             {
@@ -515,7 +520,7 @@ public class GameManager : MonoBehaviour
         }
 
         List<Node> swappableNodes = new List<Node>();
-        foreach (Node node in _nodes.Values)
+        foreach (Node node in nodeGrid)
         {
             if (node?.OccupiedBlock == null || lockedNodes.Contains(node))
             {
@@ -531,7 +536,7 @@ public class GameManager : MonoBehaviour
             SwapNodeBlock(swappableNodes[i], swappableNodes[j]);
         }
 
-        foreach (Node node in _nodes.Values)
+        foreach (Node node in nodeGrid)
         {
             Block block = node.OccupiedBlock;
             if (block == null)
