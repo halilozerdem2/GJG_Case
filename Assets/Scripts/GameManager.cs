@@ -20,6 +20,9 @@ public class GameManager : MonoBehaviour
     [SerializeField] private float blockDropDuration = 0.3f;
     [SerializeField] private ObjectPool blockPool;
     [SerializeField] private RectTransform playableAreaRect;
+    [SerializeField] private float invalidGroupShakeDuration = 0.15f;
+    [SerializeField] private Vector3 invalidGroupShakeStrength = new Vector3(0.1f, 0.1f, 0f);
+    [SerializeField] private AudioManager audioManager;
 
     private static readonly Vector2Int[] CardinalDirections =
     {
@@ -191,7 +194,7 @@ public class GameManager : MonoBehaviour
 
     public void TryBlastBlock(Block block)
     {
-        if (!IsWaitingForInput)
+        if (block == null || !IsWaitingForInput)
         {
             return;
         }
@@ -202,6 +205,7 @@ public class GameManager : MonoBehaviour
         }
         if (group.Count >= 2)
         {
+            audioManager?.PlayBlockSfx(block.blockType);
             foreach (var b in group)
             {
                 if (b.node != null)
@@ -215,6 +219,11 @@ public class GameManager : MonoBehaviour
                 blockGroups.Remove(b);
             }
             ChangeState(GameState.Falling);
+        }
+        else
+        {
+            PlayInvalidGroupFeedback(group);
+            audioManager?.PlayInvalidSelection();
         }
     }
 
@@ -308,6 +317,7 @@ public class GameManager : MonoBehaviour
         blockPool.transform.SetParent(transform);
         int totalCells = Mathf.Max(1, boardSettings.Rows * boardSettings.Columns);
         blockPool.Initialize(boardSettings.BlockPrefabs, totalCells, 1.2f);
+        blockPool.InitializeEffects(boardSettings.BlockPrefabs, boardSettings.BlastEffectPrefabs);
     }
 
     private Block SpawnBlockFromPool(int blockType, Transform parent)
@@ -410,29 +420,60 @@ public class GameManager : MonoBehaviour
 
     private void PlayBlockBlastEffect(Block block)
     {
-        if (block == null || boardSettings == null)
+        if (block == null || blockPool == null)
         {
             return;
         }
 
-        ParticleSystem effectPrefab = boardSettings.GetBlastEffectPrefab(block.blockType);
-        if (effectPrefab == null)
+        ParticleSystem effect = blockPool.SpawnBlastEffect(block.blockType, block.transform.position, GetBlastEffectRoot());
+        if (effect == null)
         {
             return;
         }
 
-        Vector3 spawnPosition = block.transform.position;
-        ParticleSystem instance = Instantiate(effectPrefab, spawnPosition, Quaternion.identity, GetBlastEffectRoot());
-        instance.Play();
+        StartCoroutine(ReturnEffectToPool(effect));
+    }
 
-        var mainModule = instance.main;
-        float lifetime = mainModule.duration;
-        if (!mainModule.loop)
+    private IEnumerator ReturnEffectToPool(ParticleSystem effect)
+    {
+        if (effect == null)
         {
-            lifetime += mainModule.startLifetime.constantMax;
+            yield break;
         }
 
-        Destroy(instance.gameObject, Mathf.Max(0.1f, lifetime));
+        while (effect.IsAlive(true))
+        {
+            yield return null;
+        }
+
+        if (blockPool != null)
+        {
+            blockPool.ReleaseBlastEffect(effect);
+        }
+    }
+
+    private void PlayInvalidGroupFeedback(IEnumerable<Block> group)
+    {
+        if (group == null)
+        {
+            return;
+        }
+
+        float duration = Mathf.Max(0.01f, invalidGroupShakeDuration);
+        Vector3 strength = invalidGroupShakeStrength;
+
+        foreach (Block b in group)
+        {
+            if (b == null)
+            {
+                continue;
+            }
+
+            Transform target = b.transform;
+            target.DOKill();
+            target.DOPunchScale(strength, duration, vibrato: 8, elasticity: 0.5f)
+                .SetEase(Ease.OutQuad);
+        }
     }
 
     private void FitBoardToScreen()

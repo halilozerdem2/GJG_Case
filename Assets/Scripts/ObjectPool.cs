@@ -9,6 +9,9 @@ public class ObjectPool : MonoBehaviour
 
     private readonly Dictionary<int, Queue<Block>> pools = new Dictionary<int, Queue<Block>>();
     private readonly Dictionary<int, Block> prefabLookup = new Dictionary<int, Block>();
+    private readonly Dictionary<int, Queue<ParticleSystem>> effectPools = new Dictionary<int, Queue<ParticleSystem>>();
+    private readonly Dictionary<int, ParticleSystem> effectPrefabLookup = new Dictionary<int, ParticleSystem>();
+    private readonly Dictionary<ParticleSystem, int> effectInstanceLookup = new Dictionary<ParticleSystem, int>();
 
     private void Awake()
     {
@@ -77,6 +80,46 @@ public class ObjectPool : MonoBehaviour
         }
     }
 
+    public void InitializeEffects(Block[] blockPrefabs, ParticleSystem[] effectPrefabs, int prewarmPerType = 2)
+    {
+        effectPools.Clear();
+        effectPrefabLookup.Clear();
+
+        if (blockPrefabs == null || effectPrefabs == null)
+        {
+            return;
+        }
+
+        int count = Mathf.Min(blockPrefabs.Length, effectPrefabs.Length);
+        for (int i = 0; i < count; i++)
+        {
+            Block blockPrefab = blockPrefabs[i];
+            ParticleSystem effectPrefab = effectPrefabs[i];
+            if (blockPrefab == null || effectPrefab == null)
+            {
+                continue;
+            }
+
+            int blockType = blockPrefab.blockType;
+            if (effectPrefabLookup.ContainsKey(blockType))
+            {
+                continue;
+            }
+
+            effectPrefabLookup[blockType] = effectPrefab;
+            Queue<ParticleSystem> queue = new Queue<ParticleSystem>(Mathf.Max(0, prewarmPerType));
+            for (int j = 0; j < prewarmPerType; j++)
+            {
+                ParticleSystem instance = CreateEffectInstance(blockType);
+                if (instance != null)
+                {
+                    queue.Enqueue(instance);
+                }
+            }
+            effectPools[blockType] = queue;
+        }
+    }
+
     public Block Spawn(int blockType, Transform parent)
     {
         if (!prefabLookup.ContainsKey(blockType))
@@ -126,5 +169,70 @@ public class ObjectPool : MonoBehaviour
         }
 
         queue.Enqueue(block);
+    }
+
+    public ParticleSystem SpawnBlastEffect(int blockType, Vector3 position, Transform parent)
+    {
+        if (!effectPrefabLookup.ContainsKey(blockType))
+        {
+            Debug.LogWarning($"No blast effect prefab registered for block type {blockType}");
+            return null;
+        }
+
+        if (!effectPools.TryGetValue(blockType, out Queue<ParticleSystem> queue))
+        {
+            queue = new Queue<ParticleSystem>();
+            effectPools[blockType] = queue;
+        }
+
+        ParticleSystem effect = queue.Count > 0 ? queue.Dequeue() : CreateEffectInstance(blockType);
+        if (effect == null)
+        {
+            return null;
+        }
+        Transform targetParent = parent != null ? parent : inactiveParent;
+        Transform effectTransform = effect.transform;
+        effectTransform.SetParent(targetParent, false);
+        effectTransform.position = position;
+        effectTransform.rotation = Quaternion.identity;
+
+        effect.gameObject.SetActive(true);
+        effect.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
+        effect.Clear(true);
+        effect.Play();
+        return effect;
+    }
+
+    public void ReleaseBlastEffect(ParticleSystem effect)
+    {
+        if (effect == null || !effectInstanceLookup.TryGetValue(effect, out int blockType))
+        {
+            return;
+        }
+
+        effect.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
+        effect.gameObject.SetActive(false);
+        effect.transform.SetParent(inactiveParent, false);
+
+        if (!effectPools.TryGetValue(blockType, out Queue<ParticleSystem> queue))
+        {
+            queue = new Queue<ParticleSystem>();
+            effectPools[blockType] = queue;
+        }
+
+        queue.Enqueue(effect);
+    }
+
+    private ParticleSystem CreateEffectInstance(int blockType)
+    {
+        if (!effectPrefabLookup.TryGetValue(blockType, out ParticleSystem prefab))
+        {
+            return null;
+        }
+
+        ParticleSystem instance = Instantiate(prefab, inactiveParent);
+        instance.gameObject.SetActive(false);
+        effectInstanceLookup[instance] = blockType;
+        return instance;
     }
 }
