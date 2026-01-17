@@ -10,7 +10,7 @@
   - When a group is discovered, update every block’s icon based on group size vs. thresholds (default / A / B / C tiers).
   - Ensure icon state refreshes when groups change (after blasts, drops, and spawns).
 
-- [ ] **Deadlock Detection & Smart Shuffle**
+- [x] **Deadlock Detection & Smart Shuffle**
   - After each grid change, scan for any blastable group (size ≥ 2). If none exist, trigger a shuffle routine.
   - Implement a deterministic shuffle that preserves column counts and only performs swaps that introduce at least one valid group (no random retries without checks).
   - Integrate the shuffle into the `GameState` flow so the board never stays in a deadlocked “WaitingInput” state.

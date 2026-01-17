@@ -33,6 +33,9 @@ public class GameManager : MonoBehaviour
     private Vector2 boardEnvelopeSize;
     private Transform gridRoot;
     private bool settingsReady;
+    private bool isValidMoveExist;
+    private int shuffleTweensPending;
+    private bool shuffleResolutionPending;
 
     private GameState _state;
 
@@ -113,6 +116,9 @@ public class GameManager : MonoBehaviour
             case GameState.Falling:
                 HandleFallingState();
                 break;
+            case GameState.Deadlock:
+                HandleDeadlockState();
+                break;
             case GameState.NoMoreMove:
                 break;
             case GameState.Win:
@@ -159,7 +165,7 @@ public class GameManager : MonoBehaviour
         }
 
         RefreshGroupVisuals();
-        ChangeState(GameState.WaitingInput);
+        ChangeState(isValidMoveExist ? GameState.WaitingInput : GameState.Deadlock);
     }
 
 
@@ -211,6 +217,7 @@ public class GameManager : MonoBehaviour
             return;
         }
 
+        isValidMoveExist = false;
         HashSet<Block> processed = new HashSet<Block>();
         foreach (var node in _nodes.Values)
         {
@@ -219,6 +226,10 @@ public class GameManager : MonoBehaviour
 
             HashSet<Block> group = block.FloodFill();
             int groupSize = group.Count;
+            if (groupSize >= 2)
+            {
+                isValidMoveExist = true;
+            }
             foreach (var member in group)
             {
                 member.ApplyGroupIcon(groupSize, boardSettings);
@@ -394,6 +405,261 @@ public class GameManager : MonoBehaviour
         ChangeState(GameState.SpawningBlocks);
     }
 
+    private void HandleDeadlockState()
+    {
+        shuffleTweensPending = 0;
+        shuffleResolutionPending = false;
+
+        shuffleTweensPending = 0;
+        shuffleResolutionPending = false;
+
+        if (!TryShuffleBoard())
+        {
+            Debug.LogWarning("Deadlock persists: unable to create a new move.");
+            ChangeState(GameState.NoMoreMove);
+            return;
+        }
+
+        if (shuffleTweensPending == 0)
+        {
+            CompleteShuffle();
+        }
+        else
+        {
+            shuffleResolutionPending = true;
+        }
+    }
+
+    private bool TryShuffleBoard()
+    {
+        if (_nodes == null || _nodes.Count == 0)
+        {
+            return false;
+        }
+
+        Dictionary<int, List<Node>> colorNodes = new Dictionary<int, List<Node>>();
+        foreach (Node node in _nodes.Values)
+        {
+            if (node?.OccupiedBlock == null)
+            {
+                continue;
+            }
+
+            int color = node.OccupiedBlock.blockType;
+            if (!colorNodes.TryGetValue(color, out List<Node> list))
+            {
+                list = new List<Node>();
+                colorNodes[color] = list;
+            }
+            list.Add(node);
+        }
+
+        int colorWithPair = GetColorWithPair(colorNodes);
+        if (colorWithPair == -1)
+        {
+            return false;
+        }
+
+        HashSet<Node> lockedNodes = new HashSet<Node>();
+        Vector2Int firstPairA = new Vector2Int(0, 0);
+        Vector2Int firstPairB = boardSettings.Columns > 1 ? new Vector2Int(1, 0) : new Vector2Int(0, 1);
+        CommitPair(colorNodes, colorWithPair, firstPairA, firstPairB, lockedNodes);
+
+        int secondColor = GetDifferentColorWithPair(colorNodes, colorWithPair);
+        if (secondColor != -1)
+        {
+            Vector2Int secondPairA;
+            Vector2Int secondPairB;
+            if (boardSettings.Columns > 2)
+            {
+                secondPairA = new Vector2Int(boardSettings.Columns - 2, 0);
+                secondPairB = new Vector2Int(boardSettings.Columns - 1, 0);
+            }
+            else if (boardSettings.Rows > 2)
+            {
+                secondPairA = new Vector2Int(0, boardSettings.Rows - 2);
+                secondPairB = new Vector2Int(0, boardSettings.Rows - 1);
+            }
+            else
+            {
+                secondColor = -1;
+                secondPairA = Vector2Int.zero;
+                secondPairB = Vector2Int.zero;
+            }
+
+            if (secondColor != -1)
+            {
+                CommitPair(colorNodes, secondColor, secondPairA, secondPairB, lockedNodes);
+            }
+        }
+
+        List<Node> swappableNodes = new List<Node>();
+        foreach (Node node in _nodes.Values)
+        {
+            if (node?.OccupiedBlock == null || lockedNodes.Contains(node))
+            {
+                continue;
+            }
+
+            swappableNodes.Add(node);
+        }
+
+        for (int i = swappableNodes.Count - 1; i > 0; i--)
+        {
+            int j = Random.Range(0, i + 1);
+            SwapNodeBlock(swappableNodes[i], swappableNodes[j]);
+        }
+
+        foreach (Node node in _nodes.Values)
+        {
+            Block block = node.OccupiedBlock;
+            if (block == null)
+            {
+                continue;
+            }
+
+            block.transform.SetParent(node.transform, true);
+            if (blockDropDuration > 0f)
+            {
+                Tweener tween = block.transform.DOLocalMove(Vector3.zero, blockDropDuration).SetEase(Ease.InOutQuad);
+                RegisterShuffleTween(tween);
+            }
+            else
+            {
+                block.transform.localPosition = Vector3.zero;
+            }
+        }
+
+        return true;
+    }
+
+    private int GetColorWithPair(Dictionary<int, List<Node>> colorNodes)
+    {
+        foreach (var kvp in colorNodes)
+        {
+            if (kvp.Value.Count >= 2)
+            {
+                return kvp.Key;
+            }
+        }
+
+        return -1;
+    }
+
+    private void CommitPair(Dictionary<int, List<Node>> colorNodes, int color, Vector2Int posA, Vector2Int posB,
+        HashSet<Node> lockedNodes)
+    {
+        if (!colorNodes.TryGetValue(color, out List<Node> nodes) || nodes.Count < 2)
+        {
+            return;
+        }
+
+        if (!_nodes.TryGetValue(posA, out Node nodeA) || !_nodes.TryGetValue(posB, out Node nodeB))
+        {
+            return;
+        }
+
+        EnsureColorAtPositions(nodes, nodeA, nodeB);
+        lockedNodes?.Add(nodeA);
+        lockedNodes?.Add(nodeB);
+    }
+
+    private void EnsureColorAtPositions(List<Node> colorNodes, Node targetA, Node targetB)
+    {
+        if (colorNodes == null || colorNodes.Count < 2)
+        {
+            return;
+        }
+
+        SwapNodeBlock(colorNodes[0], targetA);
+        SwapNodeBlock(colorNodes[1], targetB);
+
+        colorNodes[0] = targetA;
+        colorNodes[1] = targetB;
+    }
+
+    private void SwapNodeBlock(Node source, Node destination)
+    {
+        if (source == null || destination == null || source == destination)
+        {
+            return;
+        }
+
+        Block sourceBlock = source.OccupiedBlock;
+        Block destBlock = destination.OccupiedBlock;
+
+        source.OccupiedBlock = destBlock;
+        if (destBlock != null)
+        {
+            destBlock.node = source;
+        }
+
+        destination.OccupiedBlock = sourceBlock;
+        if (sourceBlock != null)
+        {
+            sourceBlock.node = destination;
+        }
+    }
+
+    private int GetDifferentColorWithPair(Dictionary<int, List<Node>> colorNodes, int excludedColor)
+    {
+        foreach (var kvp in colorNodes)
+        {
+            if (kvp.Key == excludedColor)
+            {
+                continue;
+            }
+
+            if (kvp.Value.Count >= 2)
+            {
+                return kvp.Key;
+            }
+        }
+
+        return -1;
+    }
+
+    private void RegisterShuffleTween(Tweener tween)
+    {
+        if (tween == null)
+        {
+            return;
+        }
+
+        shuffleTweensPending++;
+        tween.OnComplete(() =>
+        {
+            shuffleTweensPending = Mathf.Max(0, shuffleTweensPending - 1);
+            TryResolveShuffleTweens();
+        });
+    }
+
+    private void TryResolveShuffleTweens()
+    {
+        if (!shuffleResolutionPending || shuffleTweensPending > 0)
+        {
+            return;
+        }
+
+        CompleteShuffle();
+    }
+
+    private void CompleteShuffle()
+    {
+        shuffleResolutionPending = false;
+        UpdateFreeNodes();
+        RefreshGroupVisuals();
+
+        if (isValidMoveExist)
+        {
+            ChangeState(GameState.WaitingInput);
+        }
+        else
+        {
+            Debug.LogError("Deadlock unresolved after shuffle attempt.");
+        }
+    }
+
     private void UpdateFreeNodes()
     {
         freeNodes.Clear();
@@ -412,6 +678,7 @@ public class GameManager : MonoBehaviour
         SpawningBlocks,
         WaitingInput,
         Falling,
+        Deadlock,
         NoMoreMove,
         Win,
         Lose,
