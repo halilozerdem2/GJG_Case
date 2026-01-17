@@ -5,7 +5,7 @@
   - Enforce the brief’s limits (`2 ≤ M,N ≤ 10`, `1 ≤ K ≤ 6`, thresholds `A,B,C` in ascending order).
   - Surface these settings to designers (inspector UI) and propagate them to the board generator so every play session respects the case rules.
 
-- [ ] **Dynamic Block Icons by Group Size**
+- [x] **Dynamic Block Icons by Group Size**
   - Extend `Block` to store references to its `SpriteRenderer` and the 4 sprite variants (default + 3 tier icons).
   - When a group is discovered, update every block’s icon based on group size vs. thresholds (default / A / B / C tiers).
   - Ensure icon state refreshes when groups change (after blasts, drops, and spawns).

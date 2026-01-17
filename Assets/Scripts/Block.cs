@@ -6,6 +6,36 @@ public class Block : MonoBehaviour
     public Node node;
     public int blockType;
 
+    [Header("Visuals")]
+    [SerializeField] private SpriteRenderer spriteRenderer;
+    [SerializeField] private Sprite defaultIcon;
+    [SerializeField] private Sprite tierOneIcon;
+    [SerializeField] private Sprite tierTwoIcon;
+    [SerializeField] private Sprite tierThreeIcon;
+
+    private void Awake()
+    {
+        if (spriteRenderer == null)
+        {
+            spriteRenderer = GetComponent<SpriteRenderer>();
+        }
+    }
+
+#if UNITY_EDITOR
+    private void OnValidate()
+    {
+        if (spriteRenderer == null)
+        {
+            spriteRenderer = GetComponent<SpriteRenderer>();
+        }
+
+        if (spriteRenderer != null && defaultIcon == null)
+        {
+            defaultIcon = spriteRenderer.sprite;
+        }
+    }
+#endif
+
     public void SetBlock(Node aNode)
     {
         if (node != null) node.OccupiedBlock = null;
@@ -38,8 +68,38 @@ public class Block : MonoBehaviour
         return visited;
     }
 
+    public void ApplyGroupIcon(int groupSize, BoardSettings settings)
+    {
+        if (spriteRenderer == null || settings == null)
+        {
+            return;
+        }
+
+        Sprite spriteToUse = defaultIcon != null ? defaultIcon : spriteRenderer.sprite;
+
+        if (groupSize > settings.ThresholdC && tierThreeIcon != null)
+        {
+            spriteToUse = tierThreeIcon;
+        }
+        else if (groupSize > settings.ThresholdB && tierTwoIcon != null)
+        {
+            spriteToUse = tierTwoIcon;
+        }
+        else if (groupSize > settings.ThresholdA && tierOneIcon != null)
+        {
+            spriteToUse = tierOneIcon;
+        }
+
+        spriteRenderer.sprite = spriteToUse;
+    }
+
     private void OnMouseDown()
     {
+        if (GameManager.Instance == null || !GameManager.Instance.IsWaitingForInput)
+        {
+            return;
+        }
+
         GameManager.Instance.TryBlastBlock(this);
     }
 }

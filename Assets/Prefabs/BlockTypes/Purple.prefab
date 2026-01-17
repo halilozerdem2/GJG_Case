@@ -106,10 +106,12 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   node: {fileID: 0}
-  isBlastable: 0
-  neighboursCount: 0
-  blockType: 3
-  neighbours: []
+  blockType: 4
+  spriteRenderer: {fileID: 1784286408397178238}
+  defaultIcon: {fileID: 8161472552560778960, guid: 3716e21c2d6434e1b929462f27c4dd16, type: 3}
+  tierOneIcon: {fileID: -6416537123964203564, guid: fcdeb768e25e449b7830303b6369ce77, type: 3}
+  tierTwoIcon: {fileID: -2693315669398477313, guid: f6515eac95a96471faf24c9cb0f888f6, type: 3}
+  tierThreeIcon: {fileID: 1386842339749069192, guid: 11c84fea87b8240848bc3bb062198f23, type: 3}
 --- !u!61 &3877987389636624116
 BoxCollider2D:
   m_ObjectHideFlags: 0

@@ -107,6 +107,8 @@ public class GameManager : MonoBehaviour
         }
     }
 
+    public bool IsWaitingForInput => _state == GameState.WaitingInput;
+
     private void SpawnBlocks()
     {
         StartCoroutine(SpawnBlocksCoroutine());
@@ -132,6 +134,7 @@ public class GameManager : MonoBehaviour
             randomBlock.transform.DOMove(node.Pos, 0.3f).SetEase(Ease.OutBounce);
         }
 
+        RefreshGroupVisuals();
         ChangeState(GameState.WaitingInput);
     }
 
@@ -177,34 +180,61 @@ public class GameManager : MonoBehaviour
         }
     }
 
+    private void RefreshGroupVisuals()
+    {
+        if (!settingsReady || _nodes == null || _nodes.Count == 0)
+        {
+            return;
+        }
+
+        HashSet<Block> processed = new HashSet<Block>();
+        foreach (var node in _nodes.Values)
+        {
+            Block block = node.OccupiedBlock;
+            if (block == null || !processed.Add(block)) continue;
+
+            HashSet<Block> group = block.FloodFill();
+            int groupSize = group.Count;
+            foreach (var member in group)
+            {
+                member.ApplyGroupIcon(groupSize, boardSettings);
+                processed.Add(member);
+            }
+        }
+    }
+
     public void UpdateGrid() // O(n^3) karmaşıklığındaki yapı dicitonary kullanılarak               
     {                        // O(n^2 Log N) seviyesine düşürülecek
         for (int x = 0; x < boardSettings.Columns; x++)
         {
             for (int y = 0; y < boardSettings.Rows; y++)
             {
-                Node currentNode = _nodes.FirstOrDefault(n => n.Key.x == x && n.Key.y == y).Value;
-                if (currentNode == null || currentNode.OccupiedBlock != null) continue;
+                Vector2Int currentKey = new Vector2Int(x, y);
+                if (!_nodes.TryGetValue(currentKey, out Node currentNode) || currentNode.OccupiedBlock != null)
+                {
+                    continue;
+                }
 
                 for (int k = y + 1; k < boardSettings.Rows; k++)
                 {
-                    Node upperNode = _nodes.FirstOrDefault(n => n.Key.x == x && n.Key.y == k).Value;
-                    if (upperNode == null) continue;
-                    if (upperNode.OccupiedBlock != null)
+                    Vector2Int upperKey = new Vector2Int(x, k);
+                    if (!_nodes.TryGetValue(upperKey, out Node upperNode) || upperNode.OccupiedBlock == null)
                     {
-                        // Swap 
-                        Block blockToMove = upperNode.OccupiedBlock;
-                        blockToMove.SetBlock(currentNode);
-                        blockToMove.transform.DOMove(currentNode.Pos, 0.3f).SetEase(Ease.OutBounce);
-
-                        upperNode.OccupiedBlock = null;
-                        freeNodes.Add(upperNode);
-                        freeNodes.Remove(currentNode);
-                        break;
+                        continue;
                     }
+
+                    Block blockToMove = upperNode.OccupiedBlock;
+                    blockToMove.SetBlock(currentNode);
+                    blockToMove.transform.DOMove(currentNode.Pos, 0.3f).SetEase(Ease.OutBounce);
+
+                    freeNodes.Add(upperNode);
+                    freeNodes.Remove(currentNode);
+                    break;
                 }
             }
         }
+        UpdateFreeNodes();
+        RefreshGroupVisuals();
         SpawnBlocks();
     }
 
