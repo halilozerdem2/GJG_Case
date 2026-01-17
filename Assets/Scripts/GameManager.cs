@@ -7,12 +7,15 @@ public class GameManager : MonoBehaviour
 
     [SerializeField] private GridManager gridManager;
     [SerializeField] private BlockManager blockManager;
+    [SerializeField] private int targetFrameRate = 60;
+    [SerializeField] private int vSyncCount = 0;
 
     private GameState _state;
 
     private void Awake()
     {
         Instance = this;
+        ApplyPerformanceSettings();
     }
 
     private void Start()
@@ -112,6 +115,26 @@ public class GameManager : MonoBehaviour
         blockManager.ResolveFalling();
     }
 
+    public void ForceResolveAfterPowerup()
+    {
+        if (blockManager == null)
+        {
+            return;
+        }
+
+        ChangeState(GameState.Falling);
+    }
+
+    public void ForceSpawnAfterBoardClear()
+    {
+        if (blockManager == null)
+        {
+            return;
+        }
+
+        ChangeState(GameState.SpawningBlocks);
+    }
+
     public enum GameState
     {
         GenerateLevel,
@@ -122,5 +145,15 @@ public class GameManager : MonoBehaviour
         Win,
         Lose,
         Pause
+    }
+
+    private void ApplyPerformanceSettings()
+    {
+        QualitySettings.vSyncCount = Mathf.Max(0, vSyncCount);
+
+        if (targetFrameRate > 0)
+        {
+            Application.targetFrameRate = targetFrameRate;
+        }
     }
 }

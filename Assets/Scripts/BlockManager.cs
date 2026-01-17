@@ -17,6 +17,8 @@ public class BlockManager : MonoBehaviour
     [SerializeField] private float blockDropDuration = 0.3f;
     [SerializeField] private float invalidGroupShakeDuration = 0.15f;
     [SerializeField] private Vector3 invalidGroupShakeStrength = new Vector3(0.1f, 0.1f, 0f);
+    [SerializeField, Range(0f, 1f)] private float shuffleScaleDipRatio = 0.4f;
+    [SerializeField] private float shuffleScaleDipAmount = 0.9f;
 
     private static readonly ProfilerMarker FallingMarker = new ProfilerMarker("BlockManager.ResolveFalling");
     private static readonly ProfilerMarker SpawnBlocksMarker = new ProfilerMarker("BlockManager.SpawnBlocks");
@@ -175,6 +177,166 @@ public class BlockManager : MonoBehaviour
         }
     }
 
+    public void PowerShuffle()
+    {
+        if (gridManager == null)
+        {
+            return;
+        }
+
+        Node[,] nodeGrid = gridManager.NodeGrid;
+        BoardSettings settings = Settings;
+        if (nodeGrid == null || settings == null)
+        {
+            return;
+        }
+
+        blockGroups.Clear();
+        List<Block> blocks = new List<Block>(settings.Rows * settings.Columns);
+        for (int x = 0; x < settings.Columns; x++)
+        {
+            for (int y = 0; y < settings.Rows; y++)
+            {
+                Node node = nodeGrid[x, y];
+                if (node == null)
+                {
+                    continue;
+                }
+
+                Block occupiedBlock = node.OccupiedBlock;
+                if (occupiedBlock != null)
+                {
+                    occupiedBlock.node = null; // prevent SetBlock from clearing a reused node later
+                    blocks.Add(occupiedBlock);
+                }
+
+                node.OccupiedBlock = null;
+            }
+        }
+
+        if (blocks.Count == 0)
+        {
+            gridManager.UpdateFreeNodes();
+            RefreshGroupVisuals();
+            return;
+        }
+
+        blocks.Sort((a, b) => a.blockType.CompareTo(b.blockType));
+
+        float duration = Mathf.Max(0f, blockDropDuration * 0.5f);
+        int blockIndex = 0;
+
+        for (int x = 0; x < settings.Columns && blockIndex < blocks.Count; x++)
+        {
+            for (int y = 0; y < settings.Rows && blockIndex < blocks.Count; y++)
+            {
+                Node node = nodeGrid[x, y];
+                if (node == null)
+                {
+                    continue;
+                }
+
+                Block block = blocks[blockIndex++];
+                if (block == null)
+                {
+                    continue;
+                }
+
+                block.SetBlock(node, true);
+                if (duration > 0f)
+                {
+                    Tween tween = PlayShuffleTween(block.transform, duration);
+                    if (tween == null)
+                    {
+                        block.transform.localPosition = Vector3.zero;
+                    }
+                }
+                else
+                {
+                    block.transform.localPosition = Vector3.zero;
+                }
+            }
+        }
+
+        gridManager.UpdateFreeNodes();
+        RefreshGroupVisuals();
+    }
+
+    public bool DestroyAllBlocks()
+    {
+        if (gridManager == null)
+        {
+            return false;
+        }
+
+        Node[,] nodeGrid = gridManager.NodeGrid;
+        if (nodeGrid == null)
+        {
+            return false;
+        }
+
+        blockGroups.Clear();
+        isValidMoveExist = false;
+        bool anyDestroyed = false;
+
+        foreach (Node node in nodeGrid)
+        {
+            Block block = node?.OccupiedBlock;
+            if (block == null)
+            {
+                continue;
+            }
+
+            PlayBlockBlastEffect(block);
+            ReleaseBlock(block);
+            node.OccupiedBlock = null;
+            anyDestroyed = true;
+        }
+
+        gridManager.UpdateFreeNodes();
+        RefreshGroupVisuals();
+        return anyDestroyed;
+    }
+
+    public bool DestroyBlocksOfType(int targetBlockType)
+    {
+        if (gridManager == null)
+        {
+            return false;
+        }
+
+        Node[,] nodeGrid = gridManager.NodeGrid;
+        if (nodeGrid == null)
+        {
+            return false;
+        }
+
+        bool destroyedAny = false;
+        foreach (Node node in nodeGrid)
+        {
+            Block block = node?.OccupiedBlock;
+            if (block == null || block.blockType != targetBlockType)
+            {
+                continue;
+            }
+
+            PlayBlockBlastEffect(block);
+            ReleaseBlock(block);
+            node.OccupiedBlock = null;
+            blockGroups.Remove(block);
+            destroyedAny = true;
+        }
+
+        if (!destroyedAny)
+        {
+            return false;
+        }
+
+        gridManager.UpdateFreeNodes();
+        RefreshGroupVisuals();
+        return true;
+    }
+
     private IEnumerator SpawnBlocksCoroutine(Action<bool> onCompleted)
     {
         yield return new WaitForSeconds(0.2f);
@@ -321,6 +483,45 @@ public class BlockManager : MonoBehaviour
                 processed.Add(member);
             }
         }
+    }
+
+    private Tween PlayShuffleTween(Transform target, float duration)
+    {
+        if (target == null)
+        {
+            return null;
+        }
+
+        float moveDuration = Mathf.Max(0f, duration);
+        if (moveDuration <= 0f)
+        {
+            target.localPosition = Vector3.zero;
+            return null;
+        }
+
+        target.DOKill();
+
+        Vector3 originalScale = target.localScale;
+        Sequence sequence = DOTween.Sequence();
+        sequence.Join(target.DOLocalMove(Vector3.zero, moveDuration).SetEase(Ease.OutCubic));
+
+        float dipRatio = Mathf.Clamp01(shuffleScaleDipRatio);
+        float dipAmount = Mathf.Clamp(shuffleScaleDipAmount, 0.1f, 2f);
+        if (!Mathf.Approximately(dipAmount, 1f) && dipRatio > 0f && dipRatio < 1f)
+        {
+            float dipDuration = moveDuration * dipRatio;
+            float recoverDuration = Mathf.Max(0.01f, moveDuration - dipDuration);
+            Sequence scaleSequence = DOTween.Sequence();
+            scaleSequence.Append(target.DOScale(originalScale * dipAmount, dipDuration).SetEase(Ease.OutSine));
+            scaleSequence.Append(target.DOScale(originalScale, recoverDuration).SetEase(Ease.OutBack));
+            sequence.Join(scaleSequence);
+        }
+        else
+        {
+            sequence.Join(target.DOScale(originalScale, moveDuration).SetEase(Ease.OutBack));
+        }
+
+        return sequence;
     }
 
     private void PlayBlockBlastEffect(Block block)
@@ -486,8 +687,15 @@ public class BlockManager : MonoBehaviour
                 block.transform.SetParent(node.transform, true);
                 if (blockDropDuration > 0f)
                 {
-                    Tweener tween = block.transform.DOLocalMove(Vector3.zero, blockDropDuration).SetEase(Ease.InOutQuad);
-                    RegisterShuffleTween(tween);
+                    Tween tween = PlayShuffleTween(block.transform, blockDropDuration);
+                    if (tween != null)
+                    {
+                        RegisterShuffleTween(tween);
+                    }
+                    else
+                    {
+                        block.transform.localPosition = Vector3.zero;
+                    }
                 }
                 else
                 {
@@ -593,7 +801,7 @@ public class BlockManager : MonoBehaviour
         shuffleCompletionCallback?.Invoke(isValidMoveExist);
     }
 
-    private void RegisterShuffleTween(Tweener tween)
+    private void RegisterShuffleTween(Tween tween)
     {
         if (tween == null)
         {

@@ -17,6 +17,10 @@ public class AudioManager : MonoBehaviour
     [SerializeField] private AudioSource sfxSource;
     [SerializeField] private List<BlockSfxEntry> blockSfxEntries = new List<BlockSfxEntry>();
     [SerializeField] private AudioClip invalidSelectionClip;
+    [SerializeField] private AudioClip shuffleClip;
+    [SerializeField] private AudioClip powerShuffleClip;
+    [SerializeField] private AudioClip destroyAllClip;
+    [SerializeField] private AudioClip destroySpecificClip;
 
     private readonly Dictionary<int, AudioClip> clipLookup = new Dictionary<int, AudioClip>();
 
@@ -57,6 +61,36 @@ public class AudioManager : MonoBehaviour
         }
 
         sfxSource.PlayOneShot(invalidSelectionClip);
+    }
+
+    public void PlayShuffle()
+    {
+        PlayOneShot(shuffleClip);
+    }
+
+    public void PlayPowerShuffle()
+    {
+        PlayOneShot(powerShuffleClip);
+    }
+
+    public void PlayDestroyAll()
+    {
+        PlayOneShot(destroyAllClip);
+    }
+
+    public void PlayDestroySpecific()
+    {
+        PlayOneShot(destroySpecificClip);
+    }
+
+    private void PlayOneShot(AudioClip clip)
+    {
+        if (sfxSource == null || clip == null)
+        {
+            return;
+        }
+
+        sfxSource.PlayOneShot(clip);
     }
 
     public void RebuildLookup()
