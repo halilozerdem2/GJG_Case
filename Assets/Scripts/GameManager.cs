@@ -19,6 +19,7 @@ public class GameManager : MonoBehaviour
     [SerializeField] private float spawnHeightPadding = 1f;
     [SerializeField] private float blockDropDuration = 0.3f;
     [SerializeField] private ObjectPool blockPool;
+    [SerializeField] private RectTransform playableAreaRect;
 
     private static readonly Vector2Int[] CardinalDirections =
     {
@@ -30,6 +31,7 @@ public class GameManager : MonoBehaviour
     private static readonly ProfilerMarker FallingMarker = new ProfilerMarker("GameManager.HandleFallingState");
     private static readonly ProfilerMarker SpawnBlocksMarker = new ProfilerMarker("GameManager.SpawnBlocksCoroutine");
     private static readonly ProfilerMarker ShuffleMarker = new ProfilerMarker("GameManager.TryShuffleBoard");
+    private readonly Vector3[] playableAreaCorners = new Vector3[4];
 
     private Dictionary<Vector2Int, Node> _nodes;
     private HashSet<Node> freeNodes; // Boş olan düğümleri takip eden liste
@@ -402,6 +404,12 @@ public class GameManager : MonoBehaviour
 
         float boardWidth = boardEnvelopeSize.x > 0.01f ? boardEnvelopeSize.x : boardSettings.Columns;
         float boardHeight = boardEnvelopeSize.y > 0.01f ? boardEnvelopeSize.y : boardSettings.Rows;
+
+        if (TryFitBoardInsidePlayableArea(cam, boardWidth, boardHeight))
+        {
+            return;
+        }
+
         float verticalView = Mathf.Max(0.01f, cam.orthographicSize * 2f - boardScreenPadding * 2f);
         float horizontalView = verticalView * cam.aspect;
 
@@ -420,6 +428,103 @@ public class GameManager : MonoBehaviour
             Vector3 boardCenter = GetGridCenter();
             gridRoot.position = boardCenter;
         }
+    }
+
+    private bool TryFitBoardInsidePlayableArea(Camera cam, float boardWidth, float boardHeight)
+    {
+        if (!TryGetPlayableViewport(cam, out Rect viewportRect, out Vector3 worldCenter))
+        {
+            return false;
+        }
+
+        float totalVerticalWorld = Mathf.Max(0.01f, cam.orthographicSize * 2f);
+        float totalHorizontalWorld = totalVerticalWorld * cam.aspect;
+        float availableHeight = Mathf.Max(0.01f, totalVerticalWorld * viewportRect.height);
+        float availableWidth = Mathf.Max(0.01f, totalHorizontalWorld * viewportRect.width);
+
+        float scaleX = availableWidth / boardWidth;
+        float scaleY = availableHeight / boardHeight;
+        float scale = Mathf.Clamp(Mathf.Min(scaleX, scaleY), 0.01f, 100f);
+        Vector3 scaled = new Vector3(scale, scale, 1f);
+
+        if (boardInstance != null)
+        {
+            boardInstance.transform.localScale = Vector3.Scale(boardBaseScale, scaled);
+            boardInstance.transform.position = worldCenter;
+        }
+
+        if (gridRoot != null)
+        {
+            gridRoot.localScale = scaled;
+            gridRoot.position = worldCenter;
+        }
+
+        return true;
+    }
+
+    private bool TryGetPlayableViewport(Camera cam, out Rect viewportRect, out Vector3 worldCenter)
+    {
+        viewportRect = default;
+        worldCenter = GetGridCenter();
+
+        if (cam == null || playableAreaRect == null)
+        {
+            return false;
+        }
+
+        Canvas canvas = playableAreaRect.GetComponentInParent<Canvas>();
+        Camera uiCamera = null;
+        if (canvas != null && canvas.renderMode != RenderMode.ScreenSpaceOverlay)
+        {
+            uiCamera = canvas.worldCamera != null ? canvas.worldCamera : cam;
+        }
+
+        playableAreaRect.GetWorldCorners(playableAreaCorners);
+        Vector2 min = new Vector2(float.MaxValue, float.MaxValue);
+        Vector2 max = new Vector2(float.MinValue, float.MinValue);
+
+        for (int i = 0; i < playableAreaCorners.Length; i++)
+        {
+            Vector3 screenPoint;
+            if (canvas != null && canvas.renderMode == RenderMode.ScreenSpaceOverlay)
+            {
+                screenPoint = playableAreaCorners[i];
+            }
+            else
+            {
+                Camera referenceCamera = uiCamera != null ? uiCamera : cam;
+                screenPoint = RectTransformUtility.WorldToScreenPoint(referenceCamera, playableAreaCorners[i]);
+            }
+
+            min = Vector2.Min(min, screenPoint);
+            max = Vector2.Max(max, screenPoint);
+        }
+
+        if (max.x <= min.x || max.y <= min.y || Screen.width <= 0 || Screen.height <= 0)
+        {
+            return false;
+        }
+
+        Vector2 viewportMin = new Vector2(min.x / Screen.width, min.y / Screen.height);
+        Vector2 viewportMax = new Vector2(max.x / Screen.width, max.y / Screen.height);
+
+        viewportRect = Rect.MinMaxRect(
+            Mathf.Clamp01(viewportMin.x),
+            Mathf.Clamp01(viewportMin.y),
+            Mathf.Clamp01(viewportMax.x),
+            Mathf.Clamp01(viewportMax.y));
+
+        if (viewportRect.width <= 0f || viewportRect.height <= 0f)
+        {
+            return false;
+        }
+
+        float boardPlaneZ = gridRoot != null ? gridRoot.position.z : gridWorldCenter.z;
+        float distance = Mathf.Abs(cam.transform.position.z - boardPlaneZ);
+        Vector3 viewportCenter = new Vector3(viewportRect.center.x, viewportRect.center.y, distance);
+        worldCenter = cam.ViewportToWorldPoint(viewportCenter);
+        worldCenter.z = boardPlaneZ;
+        return true;
     }
 
     private float GetSpawnOffsetForRow(int rowIndex)
