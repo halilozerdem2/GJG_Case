@@ -50,6 +50,24 @@ public class Block : MonoBehaviour
         }
     }
 
+    public void ResetBlockState()
+    {
+        if (node != null)
+        {
+            node.OccupiedBlock = null;
+            node = null;
+        }
+
+        if (spriteRenderer != null && defaultIcon != null)
+        {
+            spriteRenderer.sprite = defaultIcon;
+        }
+
+        transform.localScale = baseLocalScale;
+        transform.localRotation = Quaternion.identity;
+        transform.localPosition = Vector3.zero;
+    }
+
     public HashSet<Block> FloodFill()
     {
         HashSet<Block> visited = new HashSet<Block>();

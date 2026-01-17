@@ -23,11 +23,11 @@
   - Replace repeated `_nodes.FirstOrDefault(...)` lookups (see `UpdateGrid`) with a `Node[,]` or per-column list for `O(1)` access.
   - Re-implement gravity/drop logic to run in `O(M*N)` by compacting columns without nested LINQ enumerations.
 
-- [ ] **Block Collection Hygiene**
+- [x] **Block Collection Hygiene**
   - Clean up `_blocks`: remove references when a block is blasted or convert it into an object pool list; otherwise it retains destroyed objects and wastes memory.
   - Decide whether `_blocks` should even exist (could derive live blocks from node occupancy when needed).
 
-- [ ] **Object Pooling & Spawn Optimizations**
+- [x] **Object Pooling & Spawn Optimizations**
   - Replace `Instantiate`/`Destroy` loops with a pool that recycles `Block` instances.
   - Reset block state (icon, node reference, animations) when reusing objects to minimize CPU/GPU spikes and GC pressure.
 

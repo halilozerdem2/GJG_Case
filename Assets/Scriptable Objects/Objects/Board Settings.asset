@@ -12,8 +12,8 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 405f46713e9f3413b8a462a988f79c9a, type: 3}
   m_Name: Board Settings
   m_EditorClassIdentifier: Assembly-CSharp::BoardSettings
-  rows: 3
-  columns: 6
+  rows: 10
+  columns: 9
   colors: 6
   blockPrefabs:
   - {fileID: 7227639219560338211, guid: f6fed28195f7948a58326dbf02721526, type: 3}

@@ -17,6 +17,7 @@ public class GameManager : MonoBehaviour
     [SerializeField] private float boardScreenPadding = 0.5f;
     [SerializeField] private float spawnHeightPadding = 1f;
     [SerializeField] private float blockDropDuration = 0.3f;
+    [SerializeField] private ObjectPool blockPool;
 
     private static readonly Vector2Int[] CardinalDirections =
     {
@@ -70,6 +71,7 @@ public class GameManager : MonoBehaviour
             return;
         }
 
+        InitializeBlockPool();
         ChangeState(GameState.GenerateLevel);
     }
 
@@ -123,8 +125,6 @@ public class GameManager : MonoBehaviour
             case GameState.Deadlock:
                 HandleDeadlockState();
                 break;
-            case GameState.NoMoreMove:
-                break;
             case GameState.Win:
                 break;
             case GameState.Lose:
@@ -151,7 +151,12 @@ public class GameManager : MonoBehaviour
 
         foreach (var node in nodesToFill)
         {
-            Block randomBlock = Instantiate(boardSettings.BlockPrefabs[Random.Range(0, boardSettings.BlockPrefabs.Length)]);
+            Block prefab = boardSettings.BlockPrefabs[Random.Range(0, boardSettings.BlockPrefabs.Length)];
+            Block randomBlock = SpawnBlockFromPool(prefab.blockType, node.transform);
+            if (randomBlock == null)
+            {
+                continue;
+            }
 
             randomBlock.SetBlock(node);
             float dropOffset = GetSpawnOffsetForRow(node.gridPosition.y);
@@ -200,7 +205,7 @@ public class GameManager : MonoBehaviour
                     freeNodes.Add(b.node); // Boşalan düğümü freeNodes'a ekle
                 }
 
-                Destroy(b.gameObject);
+                ReleaseBlock(b);
                 blockGroups.Remove(b);
             }
             ChangeState(GameState.Falling);
@@ -285,6 +290,47 @@ public class GameManager : MonoBehaviour
 
         gridRoot = new GameObject("GridRoot").transform;
         gridRoot.position = boardCenter;
+    }
+
+    private void InitializeBlockPool()
+    {
+        if (blockPool == null)
+        {
+            GameObject poolObject = new GameObject("BlockPool");
+            blockPool = poolObject.AddComponent<ObjectPool>();
+        }
+
+        blockPool.transform.SetParent(transform);
+        int capacityPerType = Mathf.Max(1, boardSettings.Rows * boardSettings.Columns);
+        blockPool.Initialize(boardSettings.BlockPrefabs, capacityPerType);
+    }
+
+    private Block SpawnBlockFromPool(int blockType, Transform parent)
+    {
+        if (blockPool == null)
+        {
+            Debug.LogError("Block pool not assigned; cannot spawn blocks.");
+            return null;
+        }
+
+        return blockPool.Spawn(blockType, parent);
+    }
+
+    private void ReleaseBlock(Block block)
+    {
+        if (block == null)
+        {
+            return;
+        }
+
+        if (blockPool != null)
+        {
+            blockPool.Release(block);
+        }
+        else
+        {
+            Debug.LogError("Block pool missing; cannot release block instance.");
+        }
     }
 
     private Vector3 CalculateBoardScaleForGrid(GameObject instance)
@@ -442,7 +488,7 @@ public class GameManager : MonoBehaviour
         if (!TryShuffleBoard())
         {
             Debug.LogWarning("Deadlock persists: unable to create a new move.");
-            ChangeState(GameState.NoMoreMove);
+            ChangeState(GameState.Deadlock);
             return;
         }
 
@@ -706,7 +752,6 @@ public class GameManager : MonoBehaviour
         WaitingInput,
         Falling,
         Deadlock,
-        NoMoreMove,
         Win,
         Lose,
         Pause
