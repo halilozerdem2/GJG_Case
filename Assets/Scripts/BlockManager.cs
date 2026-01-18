@@ -623,7 +623,7 @@ public class BlockManager : MonoBehaviour
             int colorWithPair = GetColorWithPair(colorNodes);
             if (colorWithPair == -1)
             {
-                return false;
+                return RegenerateBoardWithGuaranteedPairs(nodeGrid, settings);
             }
 
             HashSet<Node> lockedNodes = new HashSet<Node>();
@@ -824,5 +824,100 @@ public class BlockManager : MonoBehaviour
         }
 
         CompleteShuffle();
+    }
+
+    private bool RegenerateBoardWithGuaranteedPairs(Node[,] nodeGrid, BoardSettings settings)
+    {
+        if (nodeGrid == null || settings == null || gridManager == null)
+        {
+            return false;
+        }
+
+        if (blockPool == null)
+        {
+            PrepareBlockPool();
+        }
+
+        Block[] prefabs = settings.BlockPrefabs;
+        if (prefabs == null || prefabs.Length == 0)
+        {
+            return false;
+        }
+
+        int columns = Mathf.Max(0, settings.Columns);
+        int rows = Mathf.Max(0, settings.Rows);
+        if (columns * rows < 2)
+        {
+            return false;
+        }
+
+        foreach (Node node in nodeGrid)
+        {
+            Block block = node?.OccupiedBlock;
+            if (block == null)
+            {
+                continue;
+            }
+
+            ReleaseBlock(block);
+            node.OccupiedBlock = null;
+        }
+
+        gridManager.UpdateFreeNodes();
+
+        Vector2Int forcedPairA = new Vector2Int(0, 0);
+        Vector2Int forcedPairB = columns > 1 ? new Vector2Int(1, 0) : new Vector2Int(0, 1);
+        Block forcedPrefab = prefabs[Random.Range(0, prefabs.Length)];
+        if (forcedPrefab == null)
+        {
+            return false;
+        }
+
+        Node forcedNodeA = nodeGrid[forcedPairA.x, forcedPairA.y];
+        Node forcedNodeB = nodeGrid[forcedPairB.x, forcedPairB.y];
+        SpawnBlockOfType(forcedPrefab.blockType, forcedNodeA);
+        SpawnBlockOfType(forcedPrefab.blockType, forcedNodeB);
+
+        for (int x = 0; x < columns; x++)
+        {
+            for (int y = 0; y < rows; y++)
+            {
+                Node node = nodeGrid[x, y];
+                if (node == null || node.OccupiedBlock != null)
+                {
+                    continue;
+                }
+
+                Block randomPrefab = prefabs[Random.Range(0, prefabs.Length)];
+                if (randomPrefab == null)
+                {
+                    continue;
+                }
+
+                SpawnBlockOfType(randomPrefab.blockType, node);
+            }
+        }
+
+        gridManager.UpdateFreeNodes();
+        return true;
+    }
+
+    private Block SpawnBlockOfType(int blockType, Node targetNode)
+    {
+        if (targetNode == null)
+        {
+            return null;
+        }
+
+        Block spawned = SpawnBlockFromPool(blockType, targetNode.transform);
+        if (spawned == null)
+        {
+            return null;
+        }
+
+        spawned.SetBlock(targetNode);
+        spawned.transform.localPosition = Vector3.zero;
+        gridManager?.FreeNodes.Remove(targetNode);
+        return spawned;
     }
 }

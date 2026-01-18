@@ -34,3 +34,17 @@
 - [ ] **General Polish & Monitoring**
   - Hook up lightweight instrumentation (Unity Profiler markers/logs) to verify memory/CPU/GPU targets during mass blasts.
   - Create automated or editor-time validation to ensure new configs obey the case-study constraints before entering play mode.
+
+## Improvements
+
+- [x] **Deadlock Shuffle Fallback**
+  - When `TryShuffleBoard` can’t find any color pair, provide a deterministic fallback (regenerate the board, reduce K, or spawn guaranteed pairs) so the game never loops in the `Deadlock` state.
+
+- [ ] **Prefab Icon Validation**
+  - Extend editor-time validation to ensure every `Block` prefab has all four sprite tiers assigned and that sprites are not duplicated across colors, keeping the “unique icons per color/group size” promise.
+
+- [ ] **Flood-Fill Allocation Reduction**
+  - Rework `Block.FloodFill`/`RefreshGroupVisuals` to reuse buffers or share traversal data so large blasts no longer allocate fresh `HashSet`/`Stack` instances each frame.
+
+- [ ] **Spawn List Reuse**
+  - Replace the `FreeNodes.ToList()` call in `SpawnBlocksCoroutine` with a cached list or direct iteration to avoid repeated GC spikes during mass refills.
