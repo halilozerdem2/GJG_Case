@@ -52,11 +52,11 @@
   - Stable frame time under stress (mass blast + full refill) on target mobile profile.
   - Bounded draw calls (same material/atlas, minimal state changes).
   - Deterministic deadlock resolution (guarantees at least one valid group without retry loops).
-- [ ] **Core Data Model (Decouple simulation from GameObjects)**
+- [x] **Core Data Model (Decouple simulation from GameObjects)**
   - Create a `BoardModel` as a 1D array (`Cell[] cells`) where `Cell` is a struct with `byte colorId`, `byte iconTier (0..3)`, and `bool occupied` (or `colorId = 255` for empty).
   - Add helper methods for `O(1)` indexing: `Index(x,y)`, `X(i)`, `Y(i)`.
   - Move blast/drop/refill logic to operate only on `BoardModel` (no transforms, no nodes) for fewer transform touches and better CPU/memory behavior.
-- [ ] **Group Detection (Stamp-based BFS)**
+- [x] **Group Detection (Stamp-based BFS)**
   - Replace `HashSet<Block>` groups with preallocated buffers: `int[] queueOrStack`, `int[] buffer`, `int[] visitedStamp`, plus `int currentStamp`.
   - Implement `FindGroup(startIndex) -> (count, groupIndicesSpan)` with no allocations.
   - Implement a fast valid-move check: either scan BFS only when needed or run a quick adjacency check before BFS.

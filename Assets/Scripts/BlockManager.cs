@@ -1,7 +1,6 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
-using System.Linq;
 using DG.Tweening;
 using Unity.Profiling;
 using UnityEngine;
@@ -24,13 +23,15 @@ public class BlockManager : MonoBehaviour
     private static readonly ProfilerMarker SpawnBlocksMarker = new ProfilerMarker("BlockManager.SpawnBlocks");
     private static readonly ProfilerMarker ShuffleMarker = new ProfilerMarker("BlockManager.TryShuffleBoard");
 
-    private readonly Dictionary<Block, HashSet<Block>> blockGroups = new Dictionary<Block, HashSet<Block>>();
-    private readonly Stack<Block> floodStack = new Stack<Block>(64);
-    private readonly Stack<HashSet<Block>> groupSetPool = new Stack<HashSet<Block>>();
-    private readonly HashSet<HashSet<Block>> uniqueGroupCollector = new HashSet<HashSet<Block>>();
-    private readonly HashSet<Block> processedBlocks = new HashSet<Block>();
     private readonly List<Node> nodesToFillBuffer = new List<Node>(64);
     private BoardModel boardModel = new BoardModel();
+    private int[] bfsQueue;
+    private int[] groupIndicesBuffer;
+    private int[] visitedStamps;
+    private int[] cachedGroupSizes;
+    private int[] cachedGroupStamps;
+    private int visitStamp;
+    private int groupEvaluationStamp;
     private bool isValidMoveExist;
     private Transform blastEffectRoot;
     private int shuffleTweensPending;
@@ -66,7 +67,7 @@ public class BlockManager : MonoBehaviour
     {
         gridManager = grid != null ? grid : gridManager;
         ConfigureBoardModel();
-        ClearCachedGroups();
+        EnsureGroupBuffers();
         isValidMoveExist = false;
         shuffleTweensPending = 0;
         shuffleResolutionPending = false;
@@ -83,46 +84,68 @@ public class BlockManager : MonoBehaviour
 
     public bool TryHandleBlockSelection(Block block)
     {
-        if (block == null || gridManager == null)
+        if (block == null || gridManager == null || boardModel == null)
         {
             return false;
         }
 
-        bool fromCache = blockGroups.TryGetValue(block, out HashSet<Block> group);
-        if (!fromCache)
+        Node[,] nodeGrid = gridManager.NodeGrid;
+        if (nodeGrid == null || block.node == null)
         {
-            group = AcquireGroupSet();
-            block.FloodFill(group, floodStack);
+            return false;
         }
 
-        if (group.Count >= 2)
+        Vector2Int position = block.node.gridPosition;
+        int startIndex = boardModel.Index(position.x, position.y);
+        if (startIndex < 0 || !boardModel.IsOccupied(startIndex))
         {
-            Audio?.PlayBlockSfx(block.blockType);
-            foreach (var b in group)
-            {
-                if (b.node != null)
-                {
-                    ClearModelCell(b.node.gridPosition);
-                    b.node.OccupiedBlock = null;
-                    gridManager.FreeNodes.Add(b.node);
-                }
+            return false;
+        }
 
-                PlayBlockBlastEffect(b);
-                ReleaseBlock(b);
-                blockGroups.Remove(b);
+        EnsureGroupBuffers();
+        int groupCount = GatherGroupIndices(startIndex);
+        if (groupCount < 2)
+        {
+            PlayInvalidGroupFeedback(groupCount);
+            Audio?.PlayInvalidSelection();
+            return false;
+        }
+
+        Audio?.PlayBlockSfx(block.blockType);
+
+        int columns = boardModel.Columns;
+        int rows = boardModel.Rows;
+        for (int i = 0; i < groupCount; i++)
+        {
+            int memberIndex = groupIndicesBuffer[i];
+            int x = columns > 0 ? memberIndex % columns : boardModel.X(memberIndex);
+            int y = columns > 0 ? memberIndex / columns : boardModel.Y(memberIndex);
+            if (x < 0 || x >= columns || y < 0 || y >= rows)
+            {
+                boardModel.ClearCell(memberIndex);
+                continue;
             }
 
-            ReleaseGroupSet(group);
-            return true;
+            Node targetNode = nodeGrid[x, y];
+            if (targetNode == null)
+            {
+                boardModel.ClearCell(memberIndex);
+                continue;
+            }
+
+            Block member = targetNode.OccupiedBlock;
+            if (member != null)
+            {
+                targetNode.OccupiedBlock = null;
+                gridManager.FreeNodes.Add(targetNode);
+                PlayBlockBlastEffect(member);
+                ReleaseBlock(member);
+            }
+
+            boardModel.ClearCell(memberIndex);
         }
 
-        PlayInvalidGroupFeedback(group);
-        Audio?.PlayInvalidSelection();
-        if (!fromCache)
-        {
-            ReleaseGroupSet(group);
-        }
-        return false;
+        return true;
     }
 
     public void ResolveFalling()
@@ -260,7 +283,6 @@ public class BlockManager : MonoBehaviour
             return;
         }
 
-        ClearCachedGroups();
         List<Block> blocks = new List<Block>(settings.Rows * settings.Columns);
         for (int x = 0; x < settings.Columns; x++)
         {
@@ -368,7 +390,6 @@ public class BlockManager : MonoBehaviour
             return false;
         }
 
-        ClearCachedGroups();
         isValidMoveExist = false;
         bool anyDestroyed = false;
 
@@ -424,7 +445,6 @@ public class BlockManager : MonoBehaviour
             {
                 ClearModelCell(node.gridPosition);
             }
-            blockGroups.Remove(block);
             destroyedAny = true;
         }
 
@@ -571,38 +591,84 @@ public class BlockManager : MonoBehaviour
 
     private void RefreshGroupVisuals()
     {
-        if (gridManager == null || gridManager.Nodes == null || gridManager.Nodes.Count == 0)
+        Node[,] nodeGrid = gridManager?.NodeGrid;
+        BoardSettings settings = Settings;
+        if (gridManager == null || boardModel == null || nodeGrid == null || settings == null)
         {
-            ClearCachedGroups();
             isValidMoveExist = false;
             return;
         }
 
-        ClearCachedGroups();
+        EnsureGroupBuffers();
         isValidMoveExist = false;
-        processedBlocks.Clear();
-        foreach (var node in gridManager.Nodes.Values)
+        int columns = Mathf.Max(0, boardModel.Columns);
+        int rows = Mathf.Max(0, boardModel.Rows);
+        if (columns == 0 || rows == 0)
         {
-            Block block = node.OccupiedBlock;
-            if (block == null || !processedBlocks.Add(block))
-            {
-                continue;
-            }
+            return;
+        }
 
-            HashSet<Block> group = AcquireGroupSet();
-            block.FloodFill(group, floodStack);
-            int groupSize = group.Count;
+        IncrementGroupEvaluationStamp();
 
-            if (groupSize >= 2)
+        for (int y = 0; y < rows; y++)
+        {
+            for (int x = 0; x < columns; x++)
             {
-                isValidMoveExist = true;
-            }
+                int index = boardModel.Index(x, y);
+                if (index < 0)
+                {
+                    continue;
+                }
 
-            foreach (var member in group)
-            {
-                blockGroups[member] = group;
-                processedBlocks.Add(member);
-                member.ApplyGroupIcon(groupSize, Settings);
+                if (cachedGroupStamps != null && cachedGroupStamps[index] == groupEvaluationStamp)
+                {
+                    continue;
+                }
+
+                if (!boardModel.IsOccupied(index))
+                {
+                    if (cachedGroupStamps != null)
+                    {
+                        cachedGroupStamps[index] = groupEvaluationStamp;
+                        cachedGroupSizes[index] = 0;
+                    }
+                    continue;
+                }
+
+                int groupCount = GatherGroupIndices(index);
+                if (groupCount <= 0)
+                {
+                    continue;
+                }
+
+                if (groupCount >= 2)
+                {
+                    isValidMoveExist = true;
+                }
+
+                for (int i = 0; i < groupCount; i++)
+                {
+                    int memberIndex = groupIndicesBuffer[i];
+                    if (cachedGroupSizes != null)
+                    {
+                        cachedGroupSizes[memberIndex] = groupCount;
+                        cachedGroupStamps[memberIndex] = groupEvaluationStamp;
+                    }
+
+                    int memberX = columns > 0 ? memberIndex % columns : boardModel.X(memberIndex);
+                    int memberY = columns > 0 ? memberIndex / columns : boardModel.Y(memberIndex);
+                    if (memberX < 0 || memberX >= columns || memberY < 0 || memberY >= rows)
+                    {
+                        continue;
+                    }
+
+                    Node memberNode = nodeGrid[memberX, memberY];
+                    Block memberBlock = memberNode?.OccupiedBlock;
+                    if (memberBlock != null)
+                    {
+                        memberBlock.ApplyGroupIcon(groupCount, settings);
+                    }
+                }
             }
         }
     }
@@ -677,24 +743,47 @@ public class BlockManager : MonoBehaviour
         blockPool?.ReleaseBlastEffect(effect);
     }
 
-    private void PlayInvalidGroupFeedback(IEnumerable<Block> group)
+    private void PlayInvalidGroupFeedback(int groupCount)
     {
-        if (group == null)
+        if (groupCount <= 0 || gridManager == null || boardModel == null)
+        {
+            return;
+        }
+
+        Node[,] nodeGrid = gridManager.NodeGrid;
+        if (nodeGrid == null)
         {
             return;
         }
 
         float duration = Mathf.Max(0.01f, invalidGroupShakeDuration);
         Vector3 strength = invalidGroupShakeStrength;
+        int columns = Mathf.Max(0, boardModel.Columns);
+        int rows = Mathf.Max(0, boardModel.Rows);
 
-        foreach (Block b in group)
+        for (int i = 0; i < groupCount; i++)
         {
-            if (b == null)
+            if (groupIndicesBuffer == null || i >= groupIndicesBuffer.Length)
+            {
+                break;
+            }
+
+            int index = groupIndicesBuffer[i];
+            int x = columns > 0 ? index % columns : boardModel.X(index);
+            int y = columns > 0 ? index / columns : boardModel.Y(index);
+            if (x < 0 || x >= columns || y < 0 || y >= rows)
             {
                 continue;
             }
 
-            Transform target = b.transform;
+            Node node = nodeGrid[x, y];
+            Block block = node?.OccupiedBlock;
+            if (block == null)
+            {
+                continue;
+            }
+
+            Transform target = block.transform;
             target.DOKill();
             target.DOPunchScale(strength, duration, vibrato: 8, elasticity: 0.5f)
                 .SetEase(Ease.OutQuad);
@@ -950,48 +1039,6 @@ public class BlockManager : MonoBehaviour
         CompleteShuffle();
     }
 
-    private HashSet<Block> AcquireGroupSet()
-    {
-        return groupSetPool.Count > 0 ? groupSetPool.Pop() : new HashSet<Block>();
-    }
-
-    private void ReleaseGroupSet(HashSet<Block> set)
-    {
-        if (set == null)
-        {
-            return;
-        }
-
-        set.Clear();
-        groupSetPool.Push(set);
-    }
-
-    private void ClearCachedGroups()
-    {
-        if (blockGroups.Count == 0)
-        {
-            return;
-        }
-
-        uniqueGroupCollector.Clear();
-        foreach (var kvp in blockGroups)
-        {
-            if (kvp.Value != null)
-            {
-                uniqueGroupCollector.Add(kvp.Value);
-            }
-        }
-
-        blockGroups.Clear();
-
-        foreach (var group in uniqueGroupCollector)
-        {
-            ReleaseGroupSet(group);
-        }
-
-        uniqueGroupCollector.Clear();
-    }
-
     private bool RegenerateBoardWithGuaranteedPairs(Node[,] nodeGrid, BoardSettings settings)
     {
         if (nodeGrid == null || settings == null || gridManager == null)
@@ -1089,6 +1136,150 @@ public class BlockManager : MonoBehaviour
         return spawned;
     }
 
+    private void EnsureGroupBuffers()
+    {
+        int cellCount = boardModel?.CellCount ?? 0;
+        if (cellCount <= 0)
+        {
+            bfsQueue = null;
+            groupIndicesBuffer = null;
+            visitedStamps = null;
+            cachedGroupSizes = null;
+            cachedGroupStamps = null;
+            visitStamp = 0;
+            groupEvaluationStamp = 0;
+            return;
+        }
+
+        if (bfsQueue == null || bfsQueue.Length < cellCount)
+        {
+            bfsQueue = new int[cellCount];
+        }
+
+        if (groupIndicesBuffer == null || groupIndicesBuffer.Length < cellCount)
+        {
+            groupIndicesBuffer = new int[cellCount];
+        }
+
+        if (visitedStamps == null || visitedStamps.Length < cellCount)
+        {
+            visitedStamps = new int[cellCount];
+            visitStamp = 0;
+        }
+
+        if (cachedGroupSizes == null || cachedGroupSizes.Length < cellCount)
+        {
+            cachedGroupSizes = new int[cellCount];
+        }
+
+        if (cachedGroupStamps == null || cachedGroupStamps.Length < cellCount)
+        {
+            cachedGroupStamps = new int[cellCount];
+            groupEvaluationStamp = 0;
+        }
+    }
+
+    private int GatherGroupIndices(int startIndex)
+    {
+        if (boardModel == null || bfsQueue == null || groupIndicesBuffer == null || visitedStamps == null)
+        {
+            return 0;
+        }
+
+        if (!boardModel.IsValidIndex(startIndex))
+        {
+            return 0;
+        }
+
+        Cell startCell = boardModel.GetCell(startIndex);
+        if (!startCell.occupied)
+        {
+            return 0;
+        }
+
+        int columns = boardModel.Columns;
+        int rows = boardModel.Rows;
+        if (columns <= 0 || rows <= 0)
+        {
+            return 0;
+        }
+
+        int stamp = AcquireVisitStamp();
+        int head = 0;
+        int tail = 0;
+        bfsQueue[tail++] = startIndex;
+        visitedStamps[startIndex] = stamp;
+        int groupCount = 0;
+        byte colorId = startCell.colorId;
+
+        while (head < tail)
+        {
+            int current = bfsQueue[head++];
+            groupIndicesBuffer[groupCount++] = current;
+
+            int cx = columns > 0 ? current % columns : boardModel.X(current);
+            int cy = columns > 0 ? current / columns : boardModel.Y(current);
+
+            TryVisit(cx - 1, cy);
+            TryVisit(cx + 1, cy);
+            TryVisit(cx, cy - 1);
+            TryVisit(cx, cy + 1);
+        }
+
+        return groupCount;
+
+        void TryVisit(int x, int y)
+        {
+            if (x < 0 || x >= columns || y < 0 || y >= rows)
+            {
+                return;
+            }
+
+            int index = y * columns + x;
+            if (visitedStamps[index] == stamp)
+            {
+                return;
+            }
+
+            Cell cell = boardModel.GetCell(index);
+            if (!cell.occupied || cell.colorId != colorId)
+            {
+                return;
+            }
+
+            visitedStamps[index] = stamp;
+            bfsQueue[tail++] = index;
+        }
+    }
+
+    private int AcquireVisitStamp()
+    {
+        visitStamp++;
+        if (visitStamp == int.MaxValue)
+        {
+            if (visitedStamps != null)
+            {
+                Array.Clear(visitedStamps, 0, visitedStamps.Length);
+            }
+            visitStamp = 1;
+        }
+
+        return visitStamp;
+    }
+
+    private void IncrementGroupEvaluationStamp()
+    {
+        groupEvaluationStamp++;
+        if (groupEvaluationStamp == int.MaxValue)
+        {
+            if (cachedGroupStamps != null)
+            {
+                Array.Clear(cachedGroupStamps, 0, cachedGroupStamps.Length);
+            }
+            groupEvaluationStamp = 1;
+        }
+    }
+
     private void ConfigureBoardModel()
     {
         boardModel ??= new BoardModel();
@@ -1100,6 +1291,7 @@ public class BlockManager : MonoBehaviour
         }
 
         boardModel.Configure(settings.Columns, settings.Rows);
+        EnsureGroupBuffers();
     }
 
     private void SetModelCell(Vector2Int gridPosition, int blockType, byte iconTier = 0)
