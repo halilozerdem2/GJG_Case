@@ -29,6 +29,7 @@ public class BlockManager : MonoBehaviour
     private readonly Stack<HashSet<Block>> groupSetPool = new Stack<HashSet<Block>>();
     private readonly HashSet<HashSet<Block>> uniqueGroupCollector = new HashSet<HashSet<Block>>();
     private readonly HashSet<Block> processedBlocks = new HashSet<Block>();
+    private readonly List<Node> nodesToFillBuffer = new List<Node>(64);
     private bool isValidMoveExist;
     private Transform blastEffectRoot;
     private int shuffleTweensPending;
@@ -361,7 +362,14 @@ public class BlockManager : MonoBehaviour
         using (SpawnBlocksMarker.Auto())
         {
             gridManager.UpdateFreeNodes();
-            List<Node> nodesToFill = gridManager.FreeNodes.ToList();
+            nodesToFillBuffer.Clear();
+            foreach (var node in gridManager.FreeNodes)
+            {
+                if (node != null)
+                {
+                    nodesToFillBuffer.Add(node);
+                }
+            }
             float dropDuration = Mathf.Max(0f, blockDropDuration);
             BoardSettings settings = Settings;
             if (settings == null)
@@ -370,7 +378,7 @@ public class BlockManager : MonoBehaviour
                 yield break;
             }
 
-            foreach (var node in nodesToFill)
+            foreach (var node in nodesToFillBuffer)
             {
                 Block prefab = settings.BlockPrefabs[Random.Range(0, settings.BlockPrefabs.Length)];
                 Block randomBlock = SpawnBlockFromPool(prefab.blockType, node.transform);
@@ -396,6 +404,7 @@ public class BlockManager : MonoBehaviour
 
             RefreshGroupVisuals();
             onCompleted?.Invoke(isValidMoveExist);
+            nodesToFillBuffer.Clear();
         }
     }
 

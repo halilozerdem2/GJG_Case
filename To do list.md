@@ -46,7 +46,7 @@
 - [x] **Flood-Fill Allocation Reduction**
   - Rework `Block.FloodFill`/`RefreshGroupVisuals` to reuse buffers or share traversal data so large blasts no longer allocate fresh `HashSet`/`Stack` instances each frame.
 
-- [ ] **Spawn List Reuse**
+- [x] **Spawn List Reuse**
   - Replace the `FreeNodes.ToList()` call in `SpawnBlocksCoroutine` with a cached list or direct iteration to avoid repeated GC spikes during mass refills.
 
 ## Bugs

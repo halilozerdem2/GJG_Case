@@ -1451,7 +1451,7 @@ MonoBehaviour:
   boardSettings: {fileID: 11400000, guid: 2600e121bae2048f9818ec778afa5db2, type: 2}
   nodePrefab: {fileID: 3484624615903660853, guid: 4b42e5e567c374774959b299f65fe1aa, type: 3}
   boardPrefab: {fileID: 1961394637141229245, guid: b6dbdc52e8b274330bec5339e7e510f0, type: 3}
-  boardSurroundPadding: {x: 0.55, y: 0.7}
+  boardSurroundPadding: {x: 0.65, y: 0.7}
   gridWorldCenter: {x: 0, y: 0, z: 0}
   boardScreenPadding: 0.3
   playableAreaRect: {fileID: 2100000001}
