@@ -33,6 +33,10 @@ public class BoardSettings : ScriptableObject
     public int ThresholdC => thresholdC;
     public Block[] BlockPrefabs => blockPrefabs;
     public ParticleSystem[] BlastEffectPrefabs => blastEffectPrefabs;
+    public int MinRows => MinSize;
+    public int MaxRows => MaxSize;
+    public int MinColumns => MinSize;
+    public int MaxColumns => MaxSize;
 
     public bool IsValid(out string message)
     {
@@ -122,6 +126,12 @@ public class BoardSettings : ScriptableObject
         }
 
         return null;
+    }
+
+    public void ApplyDimensions(int newRows, int newColumns)
+    {
+        rows = Mathf.Clamp(newRows, MinSize, MaxSize);
+        columns = Mathf.Clamp(newColumns, MinSize, MaxSize);
     }
 
     private bool ValidateBlockPrefabs(out string message)
