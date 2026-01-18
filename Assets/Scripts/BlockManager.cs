@@ -30,8 +30,12 @@ public class BlockManager : MonoBehaviour
     private int[] visitedStamps;
     private int[] cachedGroupSizes;
     private int[] cachedGroupStamps;
+    private bool[] dirtyFlags;
+    private int[] dirtyIndices;
     private int visitStamp;
     private int groupEvaluationStamp;
+    private int dirtyCount;
+    private bool requireFullRefresh;
     private bool isValidMoveExist;
     private Transform blastEffectRoot;
     private int shuffleTweensPending;
@@ -122,14 +126,14 @@ public class BlockManager : MonoBehaviour
             int y = columns > 0 ? memberIndex / columns : boardModel.Y(memberIndex);
             if (x < 0 || x >= columns || y < 0 || y >= rows)
             {
-                boardModel.ClearCell(memberIndex);
+                ClearModelCell(memberIndex);
                 continue;
             }
 
             Node targetNode = nodeGrid[x, y];
             if (targetNode == null)
             {
-                boardModel.ClearCell(memberIndex);
+                ClearModelCell(memberIndex);
                 continue;
             }
 
@@ -142,7 +146,7 @@ public class BlockManager : MonoBehaviour
                 ReleaseBlock(member);
             }
 
-            boardModel.ClearCell(memberIndex);
+            ClearModelCell(memberIndex);
         }
 
         return true;
@@ -179,27 +183,28 @@ public class BlockManager : MonoBehaviour
                     Node currentNode = nodeGrid[x, y];
                     if (currentNode == null)
                     {
-                        boardModel.ClearCell(fromIndex);
+                        ClearModelCell(fromIndex);
                         continue;
                     }
 
                     Block block = currentNode.OccupiedBlock;
                     if (block == null)
                     {
-                        boardModel.ClearCell(fromIndex);
+                        ClearModelCell(fromIndex);
                         continue;
                     }
 
                     if (!boardModel.IsOccupied(fromIndex))
                     {
-                        boardModel.SetCell(fromIndex, ToColorId(block.blockType));
+                        SetModelCell(fromIndex, block.blockType);
                     }
 
                     if (y != writeIndex)
                     {
                         int targetIndex = boardModel.Index(x, writeIndex);
                         boardModel.CopyCell(fromIndex, targetIndex);
-                        boardModel.ClearCell(fromIndex);
+                        MarkDirtyCell(targetIndex, includeNeighbours: true);
+                        ClearModelCell(fromIndex);
 
                         Node targetNode = nodeGrid[x, writeIndex];
                         if (targetNode != null)
@@ -229,7 +234,7 @@ public class BlockManager : MonoBehaviour
                     int emptyIndex = boardModel.Index(x, y);
                     if (emptyIndex >= 0)
                     {
-                        boardModel.ClearCell(emptyIndex);
+                        ClearModelCell(emptyIndex);
                     }
                 }
             }
@@ -600,77 +605,102 @@ public class BlockManager : MonoBehaviour
         }
 
         EnsureGroupBuffers();
-        isValidMoveExist = false;
         int columns = Mathf.Max(0, boardModel.Columns);
         int rows = Mathf.Max(0, boardModel.Rows);
         if (columns == 0 || rows == 0)
+        {
+            dirtyCount = 0;
+            return;
+        }
+
+        if (requireFullRefresh)
+        {
+            MarkEntireBoardDirty();
+            requireFullRefresh = false;
+        }
+        else if (dirtyCount == 0)
         {
             return;
         }
 
         IncrementGroupEvaluationStamp();
 
-        for (int y = 0; y < rows; y++)
+        int maxIndex = boardModel.CellCount;
+
+        for (int i = 0; i < dirtyCount; i++)
         {
-            for (int x = 0; x < columns; x++)
+            int index = dirtyIndices[i];
+            if (index < 0 || index >= maxIndex)
             {
-                int index = boardModel.Index(x, y);
-                if (index < 0)
+                continue;
+            }
+
+            if (dirtyFlags != null)
+            {
+                dirtyFlags[index] = false;
+            }
+
+            if (cachedGroupStamps != null && cachedGroupStamps[index] == groupEvaluationStamp)
+            {
+                continue;
+            }
+
+            if (!boardModel.IsOccupied(index))
+            {
+                if (cachedGroupStamps != null)
+                {
+                    cachedGroupStamps[index] = groupEvaluationStamp;
+                    cachedGroupSizes[index] = 0;
+                }
+                continue;
+            }
+
+            int groupCount = GatherGroupIndices(index);
+            if (groupCount <= 0)
+            {
+                continue;
+            }
+
+            for (int j = 0; j < groupCount; j++)
+            {
+                int memberIndex = groupIndicesBuffer[j];
+                if (cachedGroupSizes != null)
+                {
+                    cachedGroupSizes[memberIndex] = groupCount;
+                    cachedGroupStamps[memberIndex] = groupEvaluationStamp;
+                }
+
+                int memberX = columns > 0 ? memberIndex % columns : boardModel.X(memberIndex);
+                int memberY = columns > 0 ? memberIndex / columns : boardModel.Y(memberIndex);
+                if (memberX < 0 || memberX >= columns || memberY < 0 || memberY >= rows)
                 {
                     continue;
                 }
 
-                if (cachedGroupStamps != null && cachedGroupStamps[index] == groupEvaluationStamp)
+                Node memberNode = nodeGrid[memberX, memberY];
+                Block memberBlock = memberNode?.OccupiedBlock;
+                if (memberBlock != null)
                 {
-                    continue;
-                }
-
-                if (!boardModel.IsOccupied(index))
-                {
-                    if (cachedGroupStamps != null)
-                    {
-                        cachedGroupStamps[index] = groupEvaluationStamp;
-                        cachedGroupSizes[index] = 0;
-                    }
-                    continue;
-                }
-
-                int groupCount = GatherGroupIndices(index);
-                if (groupCount <= 0)
-                {
-                    continue;
-                }
-
-                if (groupCount >= 2)
-                {
-                    isValidMoveExist = true;
-                }
-
-                for (int i = 0; i < groupCount; i++)
-                {
-                    int memberIndex = groupIndicesBuffer[i];
-                    if (cachedGroupSizes != null)
-                    {
-                        cachedGroupSizes[memberIndex] = groupCount;
-                        cachedGroupStamps[memberIndex] = groupEvaluationStamp;
-                    }
-
-                    int memberX = columns > 0 ? memberIndex % columns : boardModel.X(memberIndex);
-                    int memberY = columns > 0 ? memberIndex / columns : boardModel.Y(memberIndex);
-                    if (memberX < 0 || memberX >= columns || memberY < 0 || memberY >= rows)
-                    {
-                        continue;
-                    }
-
-                    Node memberNode = nodeGrid[memberX, memberY];
-                    Block memberBlock = memberNode?.OccupiedBlock;
-                    if (memberBlock != null)
-                    {
-                        memberBlock.ApplyGroupIcon(groupCount, settings);
-                    }
+                    memberBlock.ApplyGroupIcon(groupCount, settings);
                 }
             }
         }
+
+        isValidMoveExist = false;
+        if (cachedGroupSizes != null)
+        {
+            int limit = Mathf.Min(cachedGroupSizes.Length, boardModel.CellCount);
+            for (int i = 0; i < limit; i++)
+            {
+                if (cachedGroupSizes[i] >= 2)
+                {
+                    isValidMoveExist = true;
+                    break;
+                }
+            }
+        }
+
+        dirtyCount = 0;
     }
 
     private Tween PlayShuffleTween(Transform target, float duration)
@@ -834,7 +864,12 @@ public class BlockManager : MonoBehaviour
             int colorWithPair = GetColorWithPair(colorNodes);
             if (colorWithPair == -1)
             {
-                return RegenerateBoardWithGuaranteedPairs(nodeGrid, settings);
+                bool regenerated = RegenerateBoardWithGuaranteedPairs(nodeGrid, settings);
+                if (regenerated)
+                {
+                    RequireFullBoardRefresh();
+                }
+                return regenerated;
             }
 
             HashSet<Node> lockedNodes = new HashSet<Node>();
@@ -887,15 +922,23 @@ public class BlockManager : MonoBehaviour
                 SwapNodeBlock(swappableNodes[i], swappableNodes[j]);
             }
 
-            foreach (Node node in nodeGrid)
+        for (int y = 0; y < settings.Rows; y++)
+        {
+            for (int x = 0; x < settings.Columns; x++)
             {
+                Node node = nodeGrid[x, y];
+                if (node == null)
+                {
+                    continue;
+                }
+
                 Block block = node.OccupiedBlock;
                 if (block == null)
                 {
                     continue;
                 }
 
-                block.transform.SetParent(node.transform, true);
+                block.SetBlock(node, true);
                 if (blockDropDuration > 0f)
                 {
                     Tween tween = PlayShuffleTween(block.transform, blockDropDuration);
@@ -913,7 +956,9 @@ public class BlockManager : MonoBehaviour
                     block.transform.localPosition = Vector3.zero;
                 }
             }
+        }
 
+            RequireFullBoardRefresh();
             return true;
         }
     }
@@ -1077,6 +1122,7 @@ public class BlockManager : MonoBehaviour
         }
 
         boardModel?.Clear();
+        RequireFullBoardRefresh();
         gridManager.UpdateFreeNodes();
 
         Vector2Int forcedPairA = new Vector2Int(0, 0);
@@ -1136,6 +1182,11 @@ public class BlockManager : MonoBehaviour
         return spawned;
     }
 
+    private void RequireFullBoardRefresh()
+    {
+        requireFullRefresh = true;
+    }
+
     private void EnsureGroupBuffers()
     {
         int cellCount = boardModel?.CellCount ?? 0;
@@ -1146,8 +1197,12 @@ public class BlockManager : MonoBehaviour
             visitedStamps = null;
             cachedGroupSizes = null;
             cachedGroupStamps = null;
+            dirtyFlags = null;
+            dirtyIndices = null;
+            dirtyCount = 0;
             visitStamp = 0;
             groupEvaluationStamp = 0;
+            requireFullRefresh = true;
             return;
         }
 
@@ -1176,6 +1231,18 @@ public class BlockManager : MonoBehaviour
         {
             cachedGroupStamps = new int[cellCount];
             groupEvaluationStamp = 0;
+        }
+
+        if (dirtyFlags == null || dirtyFlags.Length < cellCount)
+        {
+            dirtyFlags = new bool[cellCount];
+            dirtyIndices = new int[cellCount];
+            dirtyCount = 0;
+            requireFullRefresh = true;
+        }
+        else if (dirtyIndices == null || dirtyIndices.Length < cellCount)
+        {
+            dirtyIndices = new int[cellCount];
         }
     }
 
@@ -1280,6 +1347,74 @@ public class BlockManager : MonoBehaviour
         }
     }
 
+    private void MarkDirtyCell(int index, bool includeNeighbours = false)
+    {
+        if (boardModel == null || index < 0)
+        {
+            return;
+        }
+
+        EnsureGroupBuffers();
+        if (dirtyFlags == null || dirtyIndices == null)
+        {
+            return;
+        }
+
+        if (!dirtyFlags[index])
+        {
+            dirtyFlags[index] = true;
+            if (dirtyCount >= dirtyIndices.Length)
+            {
+                Array.Resize(ref dirtyIndices, dirtyIndices.Length * 2);
+            }
+            dirtyIndices[dirtyCount++] = index;
+        }
+
+        if (!includeNeighbours)
+        {
+            return;
+        }
+
+        int x = boardModel.X(index);
+        int y = boardModel.Y(index);
+        MarkDirtyNeighbour(x - 1, y);
+        MarkDirtyNeighbour(x + 1, y);
+        MarkDirtyNeighbour(x, y - 1);
+        MarkDirtyNeighbour(x, y + 1);
+    }
+
+    private void MarkDirtyNeighbour(int x, int y)
+    {
+        int neighbourIndex = boardModel.Index(x, y);
+        if (neighbourIndex >= 0)
+        {
+            MarkDirtyCell(neighbourIndex);
+        }
+    }
+
+    private void MarkEntireBoardDirty()
+    {
+        if (boardModel == null)
+        {
+            dirtyCount = 0;
+            return;
+        }
+
+        EnsureGroupBuffers();
+        if (dirtyFlags == null || dirtyIndices == null)
+        {
+            return;
+        }
+
+        int total = boardModel.CellCount;
+        dirtyCount = 0;
+        for (int i = 0; i < total; i++)
+        {
+            dirtyFlags[i] = true;
+            dirtyIndices[dirtyCount++] = i;
+        }
+    }
+
     private void ConfigureBoardModel()
     {
         boardModel ??= new BoardModel();
@@ -1287,11 +1422,13 @@ public class BlockManager : MonoBehaviour
         if (settings == null)
         {
             boardModel.Configure(0, 0);
+            RequireFullBoardRefresh();
             return;
         }
 
         boardModel.Configure(settings.Columns, settings.Rows);
         EnsureGroupBuffers();
+        RequireFullBoardRefresh();
     }
 
     private void SetModelCell(Vector2Int gridPosition, int blockType, byte iconTier = 0)
@@ -1302,12 +1439,18 @@ public class BlockManager : MonoBehaviour
         }
 
         int index = boardModel.Index(gridPosition.x, gridPosition.y);
-        if (index < 0)
+        SetModelCell(index, blockType, iconTier);
+    }
+
+    private void SetModelCell(int index, int blockType, byte iconTier = 0)
+    {
+        if (boardModel == null || index < 0)
         {
             return;
         }
 
         boardModel.SetCell(index, ToColorId(blockType), iconTier, true);
+        MarkDirtyCell(index, includeNeighbours: true);
     }
 
     private void ClearModelCell(Vector2Int gridPosition)
@@ -1318,10 +1461,18 @@ public class BlockManager : MonoBehaviour
         }
 
         int index = boardModel.Index(gridPosition.x, gridPosition.y);
-        if (index >= 0)
+        ClearModelCell(index);
+    }
+
+    private void ClearModelCell(int index)
+    {
+        if (boardModel == null || index < 0)
         {
-            boardModel.ClearCell(index);
+            return;
         }
+
+        boardModel.ClearCell(index);
+        MarkDirtyCell(index, includeNeighbours: true);
     }
 
     private void SwapModelCells(Vector2Int positionA, Vector2Int positionB)
@@ -1339,6 +1490,8 @@ public class BlockManager : MonoBehaviour
         }
 
         boardModel.SwapCells(indexA, indexB);
+        MarkDirtyCell(indexA, includeNeighbours: true);
+        MarkDirtyCell(indexB, includeNeighbours: true);
     }
 
     private static byte ToColorId(int blockType)

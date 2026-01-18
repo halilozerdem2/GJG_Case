@@ -60,7 +60,7 @@
   - Replace `HashSet<Block>` groups with preallocated buffers: `int[] queueOrStack`, `int[] buffer`, `int[] visitedStamp`, plus `int currentStamp`.
   - Implement `FindGroup(startIndex) -> (count, groupIndicesSpan)` with no allocations.
   - Implement a fast valid-move check: either scan BFS only when needed or run a quick adjacency check before BFS.
-- [ ] **Incremental Updates (Dirty Region Refresh)**
+- [x] **Incremental Updates (Dirty Region Refresh)**
   - Introduce a dirty set of indices/columns impacted by the last action (blasted groups, neighbors, collapsed/refilled columns).
   - Recompute groups and icon tiers only for dirty cells while guaranteeing correctness after blast, gravity, refill, and shuffle.
 - [ ] **Rendering Layer (Keep visuals cheap and predictable)**
