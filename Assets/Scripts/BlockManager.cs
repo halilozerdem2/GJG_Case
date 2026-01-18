@@ -189,10 +189,11 @@ public class BlockManager : MonoBehaviour
         }
     }
 
-    public void PowerShuffle()
+    public void PowerShuffle(Action onCompleted = null)
     {
         if (gridManager == null)
         {
+            onCompleted?.Invoke();
             return;
         }
 
@@ -200,6 +201,7 @@ public class BlockManager : MonoBehaviour
         BoardSettings settings = Settings;
         if (nodeGrid == null || settings == null)
         {
+            onCompleted?.Invoke();
             return;
         }
 
@@ -237,6 +239,17 @@ public class BlockManager : MonoBehaviour
 
         float duration = Mathf.Max(0f, blockDropDuration * 0.5f);
         int blockIndex = 0;
+        int powerShuffleTweens = 0;
+        bool completionInvoked = false;
+
+        void TryCompletePowerShuffle()
+        {
+            if (!completionInvoked && powerShuffleTweens <= 0)
+            {
+                completionInvoked = true;
+                onCompleted?.Invoke();
+            }
+        }
 
         for (int x = 0; x < settings.Columns && blockIndex < blocks.Count; x++)
         {
@@ -258,7 +271,16 @@ public class BlockManager : MonoBehaviour
                 if (duration > 0f)
                 {
                     Tween tween = PlayShuffleTween(block.transform, duration);
-                    if (tween == null)
+                    if (tween != null)
+                    {
+                        powerShuffleTweens++;
+                        tween.OnComplete(() =>
+                        {
+                            powerShuffleTweens = Mathf.Max(0, powerShuffleTweens - 1);
+                            TryCompletePowerShuffle();
+                        });
+                    }
+                    else
                     {
                         block.transform.localPosition = Vector3.zero;
                     }
@@ -272,6 +294,7 @@ public class BlockManager : MonoBehaviour
 
         gridManager.UpdateFreeNodes();
         RefreshGroupVisuals();
+        TryCompletePowerShuffle();
     }
 
     public bool DestroyAllBlocks()

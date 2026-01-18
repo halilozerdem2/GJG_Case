@@ -16,7 +16,14 @@ public class LevelCanvasManager : MonoBehaviour
             return;
         }
 
+        if (GameManager.Instance == null || !GameManager.Instance.IsWaitingForInput)
+        {
+            Audio?.PlayInvalidSelection();
+            return;
+        }
+
         blockTypeSelectionPanel?.Hide();
+        GameManager.Instance.ForceShuffleInProgress();
         Audio?.PlayShuffle();
         blockManager.ResolveDeadlock(HandleShuffleCompleted);
     }
@@ -29,10 +36,16 @@ public class LevelCanvasManager : MonoBehaviour
             return;
         }
 
+        if (GameManager.Instance == null || !GameManager.Instance.IsWaitingForInput)
+        {
+            Audio?.PlayInvalidSelection();
+            return;
+        }
+
         blockTypeSelectionPanel?.Hide();
-        blockManager.PowerShuffle();
+        GameManager.Instance.ForceShuffleInProgress();
+        blockManager.PowerShuffle(HandlePowerShuffleCompleted);
         Audio?.PlayPowerShuffle();
-        GameManager.Instance?.ForceResolveAfterPowerup();
     }
 
     public void OnDestroyAllButton()
@@ -78,12 +91,18 @@ public class LevelCanvasManager : MonoBehaviour
     {
         if (success)
         {
-            GameManager.Instance?.ForceResolveAfterPowerup();
+            GameManager.Instance?.ForceWaitingAfterShuffle();
         }
         else
         {
             Audio?.PlayInvalidSelection();
+            GameManager.Instance?.ForceWaitingAfterShuffle();
         }
+    }
+
+    private void HandlePowerShuffleCompleted()
+    {
+        GameManager.Instance?.ForceWaitingAfterShuffle();
     }
 
     private void HandleDestroySpecificSelection(int blockType)

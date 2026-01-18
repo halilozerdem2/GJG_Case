@@ -135,6 +135,16 @@ public class GameManager : MonoBehaviour
         ChangeState(GameState.SpawningBlocks);
     }
 
+    public void ForceShuffleInProgress()
+    {
+        _state = GameState.Pause;
+    }
+
+    public void ForceWaitingAfterShuffle()
+    {
+        ChangeState(GameState.WaitingInput);
+    }
+
     public enum GameState
     {
         GenerateLevel,
