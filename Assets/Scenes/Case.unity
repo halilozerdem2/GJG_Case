@@ -132,7 +132,7 @@ GameObject:
   - component: {fileID: 7995543}
   - component: {fileID: 7995542}
   m_Layer: 5
-  m_Name: Main Menu Button (1)
+  m_Name: Settings Button
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -201,8 +201,8 @@ MonoBehaviour:
   m_OnClick:
     m_PersistentCalls:
       m_Calls:
-      - m_Target: {fileID: 858558407}
-        m_TargetAssemblyTypeName: CaseCanvasManager, Assembly-CSharp
+      - m_Target: {fileID: 858558406}
+        m_TargetAssemblyTypeName: LevelCanvasManager, Assembly-CSharp
         m_MethodName: OpenSettingsPanel
         m_Mode: 1
         m_Arguments:
@@ -251,6 +251,80 @@ CanvasRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 7995540}
   m_CullTransparentMesh: 1
+--- !u!1 &25250506
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 25250509}
+  - component: {fileID: 25250508}
+  - component: {fileID: 25250507}
+  m_Layer: 0
+  m_Name: Level Manager
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &25250507
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 25250506}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 1cbe2ac1599c41c6baebb04edab1eeb8, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  boardSettings: {fileID: 11400000, guid: 2600e121bae2048f9818ec778afa5db2, type: 2}
+  gridManager: {fileID: 25250508}
+  blockPool: {fileID: 1873155942}
+  audioManager: {fileID: 2100000005}
+  spawnHeightPadding: 2
+  blockDropDuration: 0.3
+  invalidGroupShakeDuration: 0.15
+  invalidGroupShakeStrength: {x: 0.1, y: 0.1, z: 0}
+  shuffleScaleDipRatio: 0.4
+  shuffleScaleDipAmount: 0.9
+--- !u!114 &25250508
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 25250506}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 90109448158246f395cf9a93fb6356ea, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  boardSettings: {fileID: 11400000, guid: 2600e121bae2048f9818ec778afa5db2, type: 2}
+  nodePrefab: {fileID: 3484624615903660853, guid: 4b42e5e567c374774959b299f65fe1aa, type: 3}
+  boardPrefab: {fileID: 1961394637141229245, guid: b6dbdc52e8b274330bec5339e7e510f0, type: 3}
+  boardSurroundPadding: {x: 0.9, y: 1}
+  gridWorldCenter: {x: 0, y: 0, z: 0}
+  boardScreenPadding: 0.3
+  playableAreaRect: {fileID: 2100000001}
+--- !u!4 &25250509
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 25250506}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 437.3614, y: 2607.6958, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &36829999
 GameObject:
   m_ObjectHideFlags: 0
@@ -965,6 +1039,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::SettingsPanelController
   panelRoot: {fileID: 362209868}
+  settingsService: {fileID: 0}
   musicAnimator: {fileID: 1504387540}
   sfxAnimator: {fileID: 1656967914}
   vibrationAnimator: {fileID: 1210671209}
@@ -2904,97 +2979,6 @@ PrefabInstance:
       insertIndex: -1
       addedObject: {fileID: 1917589415}
   m_SourcePrefab: {fileID: 100100000, guid: b1d6e640ca7404cb69f8e7d2a457a12c, type: 3}
---- !u!1 &783256712
-GameObject:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  serializedVersion: 6
-  m_Component:
-  - component: {fileID: 783256714}
-  - component: {fileID: 783256713}
-  - component: {fileID: 783256716}
-  - component: {fileID: 783256717}
-  m_Layer: 0
-  m_Name: GameManager
-  m_TagString: Untagged
-  m_Icon: {fileID: 0}
-  m_NavMeshLayer: 0
-  m_StaticEditorFlags: 0
-  m_IsActive: 1
---- !u!114 &783256713
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 783256712}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: d042a1b917be5470398da7735d1b6f10, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  gridManager: {fileID: 783256716}
-  blockManager: {fileID: 783256717}
-  targetFrameRate: 60
-  vSyncCount: 0
---- !u!4 &783256714
-Transform:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 783256712}
-  serializedVersion: 2
-  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: -0.106402695, y: 0.5620742, z: -0.04627986}
-  m_LocalScale: {x: 1, y: 1, z: 1}
-  m_ConstrainProportionsScale: 0
-  m_Children: []
-  m_Father: {fileID: 0}
-  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!114 &783256716
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 783256712}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 90109448158246f395cf9a93fb6356ea, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  boardSettings: {fileID: 11400000, guid: 2600e121bae2048f9818ec778afa5db2, type: 2}
-  nodePrefab: {fileID: 3484624615903660853, guid: 4b42e5e567c374774959b299f65fe1aa, type: 3}
-  boardPrefab: {fileID: 1961394637141229245, guid: b6dbdc52e8b274330bec5339e7e510f0, type: 3}
-  boardSurroundPadding: {x: 0.65, y: 0.7}
-  gridWorldCenter: {x: 0, y: 0, z: 0}
-  boardScreenPadding: 0.3
-  playableAreaRect: {fileID: 2100000001}
---- !u!114 &783256717
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 783256712}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 1cbe2ac1599c41c6baebb04edab1eeb8, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  boardSettings: {fileID: 11400000, guid: 2600e121bae2048f9818ec778afa5db2, type: 2}
-  gridManager: {fileID: 783256716}
-  blockPool: {fileID: 1873155942}
-  audioManager: {fileID: 2100000005}
-  spawnHeightPadding: 2
-  blockDropDuration: 0.3
-  invalidGroupShakeDuration: 0.15
-  invalidGroupShakeStrength: {x: 0.1, y: 0.1, z: 0}
-  shuffleScaleDipRatio: 0.4
-  shuffleScaleDipAmount: 0.9
 --- !u!1 &793354773
 GameObject:
   m_ObjectHideFlags: 0
@@ -3181,7 +3165,6 @@ GameObject:
   - component: {fileID: 858558404}
   - component: {fileID: 858558403}
   - component: {fileID: 858558406}
-  - component: {fileID: 858558407}
   m_Layer: 5
   m_Name: Canvas
   m_TagString: Untagged
@@ -3289,26 +3272,15 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 3941944f4c774939b4950996470d23e5, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::LevelCanvasManager
-  blockManager: {fileID: 783256717}
+  blockManager: {fileID: 25250507}
   blockTypeSelectionPanel: {fileID: 2078002041}
   audioManager: {fileID: 2100000005}
---- !u!114 &858558407
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 858558401}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: afd21f0538836444488907770ef8b435, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::CaseCanvasManager
+  settingsService: {fileID: 0}
   settingsPanel: {fileID: 362209868}
-  settingsPanelController: {fileID: 0}
-  musicAnimator: {fileID: 0}
-  sfxAnimator: {fileID: 0}
-  vibrationAnimator: {fileID: 0}
+  settingsPanelController: {fileID: 362209870}
+  musicAnimator: {fileID: 1504387540}
+  sfxAnimator: {fileID: 1656967914}
+  vibrationAnimator: {fileID: 1210671209}
 --- !u!1 &864985829
 GameObject:
   m_ObjectHideFlags: 0
@@ -3940,8 +3912,8 @@ MonoBehaviour:
   m_OnClick:
     m_PersistentCalls:
       m_Calls:
-      - m_Target: {fileID: 858558407}
-        m_TargetAssemblyTypeName: CaseCanvasManager, Assembly-CSharp
+      - m_Target: {fileID: 858558406}
+        m_TargetAssemblyTypeName: LevelCanvasManager, Assembly-CSharp
         m_MethodName: GoToPlayScene
         m_Mode: 1
         m_Arguments:
@@ -6913,9 +6885,9 @@ MonoBehaviour:
   m_OnClick:
     m_PersistentCalls:
       m_Calls:
-      - m_Target: {fileID: 858558407}
-        m_TargetAssemblyTypeName: CaseCanvasManager, Assembly-CSharp
-        m_MethodName: GoToMainMenu
+      - m_Target: {fileID: 858558406}
+        m_TargetAssemblyTypeName: LevelCanvasManager, Assembly-CSharp
+        m_MethodName: GoToHomeScene
         m_Mode: 1
         m_Arguments:
           m_ObjectArgument: {fileID: 0}
@@ -6968,7 +6940,6 @@ SceneRoots:
   m_ObjectHideFlags: 0
   m_Roots:
   - {fileID: 858558402}
-  - {fileID: 783256714}
   - {fileID: 519420032}
   - {fileID: 619394802}
   - {fileID: 1119378652}
@@ -6976,3 +6947,4 @@ SceneRoots:
   - {fileID: 1873155943}
   - {fileID: 101983251}
   - {fileID: 2100000003}
+  - {fileID: 25250509}

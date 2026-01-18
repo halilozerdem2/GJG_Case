@@ -2,11 +2,33 @@ using UnityEngine;
 
 public static class VibrationManager
 {
-    public static bool IsEnabled => PlayerSettings.VibrationEnabled;
+    private static bool isInitialized;
+    private static bool isEnabled;
+
+    public static bool IsEnabled
+    {
+        get
+        {
+            if (!isInitialized)
+            {
+                isEnabled = PlayerSettings.VibrationEnabled;
+                isInitialized = true;
+            }
+
+            return isEnabled;
+        }
+    }
+
+    public static void Initialize(bool enabled)
+    {
+        isEnabled = enabled;
+        isInitialized = true;
+    }
 
     public static void SetEnabled(bool enabled)
     {
-        PlayerSettings.VibrationEnabled = enabled;
+        isEnabled = enabled;
+        isInitialized = true;
     }
 
     public static void Pulse()

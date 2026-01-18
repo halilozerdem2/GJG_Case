@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 
 public class GameManager : MonoBehaviour
 {
@@ -9,25 +10,36 @@ public class GameManager : MonoBehaviour
     [SerializeField] private BlockManager blockManager;
     [SerializeField] private int targetFrameRate = 60;
     [SerializeField] private int vSyncCount = 0;
+    [SerializeField] private string mainMenuSceneName = "MainMenu";
 
     private GameState _state;
 
     private void Awake()
     {
+        if (Instance != null && Instance != this)
+        {
+            Destroy(gameObject);
+            return;
+        }
+
         Instance = this;
+        DontDestroyOnLoad(gameObject);
         ApplyPerformanceSettings();
+        SceneManager.sceneLoaded += HandleSceneLoaded;
+        EnsureMainMenuLoaded();
+    }
+
+    private void OnDestroy()
+    {
+        if (Instance == this)
+        {
+            SceneManager.sceneLoaded -= HandleSceneLoaded;
+        }
     }
 
     private void Start()
     {
-        if (gridManager == null || blockManager == null)
-        {
-            Debug.LogError("GameManager requires references to GridManager and BlockManager.");
-            enabled = false;
-            return;
-        }
-
-        ChangeState(GameState.GenerateLevel);
+        SetupScene(SceneManager.GetActiveScene());
     }
 
     private void ChangeState(GameState newState)
@@ -177,6 +189,52 @@ public class GameManager : MonoBehaviour
         if (targetFrameRate > 0)
         {
             Application.targetFrameRate = targetFrameRate;
+        }
+    }
+
+    private void HandleSceneLoaded(Scene scene, LoadSceneMode mode)
+    {
+        SetupScene(scene);
+    }
+
+    private void SetupScene(Scene scene)
+    {
+        if (IsMainMenuScene(scene))
+        {
+            _state = GameState.Pause;
+            gridManager = null;
+            blockManager = null;
+            return;
+        }
+
+        gridManager = FindObjectOfType<GridManager>();
+        blockManager = FindObjectOfType<BlockManager>();
+
+        if (gridManager == null || blockManager == null)
+        {
+            Debug.LogWarning("GameManager could not find GridManager or BlockManager in the scene.");
+            return;
+        }
+
+        ChangeState(GameState.GenerateLevel);
+    }
+
+    private bool IsMainMenuScene(Scene scene)
+    {
+        if (!string.IsNullOrEmpty(mainMenuSceneName) && scene.name == mainMenuSceneName)
+        {
+            return true;
+        }
+
+        return scene.buildIndex == 0;
+    }
+
+    private void EnsureMainMenuLoaded()
+    {
+        Scene current = SceneManager.GetActiveScene();
+        if (!IsMainMenuScene(current))
+        {
+            SceneManager.LoadScene(0);
         }
     }
 }

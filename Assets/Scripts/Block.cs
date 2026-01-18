@@ -45,6 +45,7 @@ public class Block : MonoBehaviour
         if (node != null) node.OccupiedBlock = null;
         node = aNode;
         node.OccupiedBlock = this;
+        ApplyNodeSortingOrder();
         transform.SetParent(node.transform, preserveWorldPosition);
         transform.localRotation = Quaternion.identity;
         transform.localScale = baseLocalScale;
@@ -163,5 +164,25 @@ public class Block : MonoBehaviour
         {
             baseLocalScale = transform.localScale == Vector3.zero ? Vector3.one : transform.localScale;
         }
+    }
+
+    private void ApplyNodeSortingOrder()
+    {
+        if (node == null)
+        {
+            return;
+        }
+
+        if (spriteRenderer == null)
+        {
+            spriteRenderer = GetComponent<SpriteRenderer>();
+        }
+
+        if (spriteRenderer == null)
+        {
+            return;
+        }
+
+        spriteRenderer.sortingOrder = node.SortingOrder;
     }
 }

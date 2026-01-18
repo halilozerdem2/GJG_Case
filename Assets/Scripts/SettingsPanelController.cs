@@ -3,10 +3,24 @@ using UnityEngine;
 public class SettingsPanelController : MonoBehaviour
 {
     [SerializeField] private GameObject panelRoot;
+    [SerializeField] private SettingsService settingsService;
     [Header("Toggle Animators")]
     [SerializeField] private ToggleSwitchAnimator musicAnimator;
     [SerializeField] private ToggleSwitchAnimator sfxAnimator;
     [SerializeField] private ToggleSwitchAnimator vibrationAnimator;
+
+    private SettingsService Service
+    {
+        get
+        {
+            if (settingsService == null)
+            {
+                settingsService = SettingsService.Instance;
+            }
+
+            return settingsService;
+        }
+    }
 
     private void Awake()
     {
@@ -15,6 +29,11 @@ public class SettingsPanelController : MonoBehaviour
             panelRoot = gameObject;
         }
 
+    }
+
+    private void OnEnable()
+    {
+        SyncToggleStates();
     }
 
     public void ClosePanel()
@@ -27,45 +46,53 @@ public class SettingsPanelController : MonoBehaviour
 
     public void ToggleMusic()
     {
-        musicAnimator?.Toggle();
-        if (AudioManager.Instance != null)
+        var service = Service;
+        if (service == null)
         {
-            AudioManager.Instance.SetMusicEnabled(!AudioManager.Instance.IsMusicEnabled);
+            return;
         }
-        else
-        {
-            PlayerSettings.MusicEnabled = !PlayerSettings.MusicEnabled;
-        }
+
+        bool newValue = !service.MusicEnabled;
+        service.SetMusicEnabled(newValue);
+        musicAnimator?.SetState(newValue);
     }
 
     public void ToggleSfx()
     {
-        sfxAnimator?.Toggle();
-        if (AudioManager.Instance != null)
+        var service = Service;
+        if (service == null)
         {
-            AudioManager.Instance.SetSfxEnabled(!AudioManager.Instance.IsSfxEnabled);
+            return;
         }
-        else
-        {
-            PlayerSettings.SfxEnabled = !PlayerSettings.SfxEnabled;
-        }
+
+        bool newValue = !service.SfxEnabled;
+        service.SetSfxEnabled(newValue);
+        sfxAnimator?.SetState(newValue);
     }
 
     public void ToggleVibration()
     {
-        vibrationAnimator?.Toggle();
-        VibrationManager.SetEnabled(!VibrationManager.IsEnabled);
+        var service = Service;
+        if (service == null)
+        {
+            return;
+        }
+
+        bool newValue = !service.VibrationEnabled;
+        service.SetVibrationEnabled(newValue);
+        vibrationAnimator?.SetState(newValue);
     }
 
     private void SyncToggleStates()
     {
-        var audio = AudioManager.Instance;
-        if (audio != null)
+        var service = Service;
+        if (service == null)
         {
-            musicAnimator?.SetState(audio.IsMusicEnabled);
-            sfxAnimator?.SetState(audio.IsSfxEnabled);
+            return;
         }
 
-        vibrationAnimator?.SetState(VibrationManager.IsEnabled);
+        musicAnimator?.SetState(service.MusicEnabled);
+        sfxAnimator?.SetState(service.SfxEnabled);
+        vibrationAnimator?.SetState(service.VibrationEnabled);
     }
 }

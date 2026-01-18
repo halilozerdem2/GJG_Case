@@ -1,12 +1,37 @@
 using UnityEngine;
+using UnityEngine.SceneManagement;
 
 public class LevelCanvasManager : MonoBehaviour
 {
     [SerializeField] private BlockManager blockManager;
     [SerializeField] private BlockTypeSelectionPanel blockTypeSelectionPanel;
     [SerializeField] private AudioManager audioManager;
+    [SerializeField] private SettingsService settingsService;
+    [Header("Settings Panel")]
+    [SerializeField] private GameObject settingsPanel;
+    [SerializeField] private SettingsPanelController settingsPanelController;
+    [SerializeField] private ToggleSwitchAnimator musicAnimator;
+    [SerializeField] private ToggleSwitchAnimator sfxAnimator;
+    [SerializeField] private ToggleSwitchAnimator vibrationAnimator;
 
     private AudioManager Audio => audioManager != null ? audioManager : AudioManager.Instance;
+    private SettingsService Service
+    {
+        get
+        {
+            if (settingsService == null)
+            {
+                settingsService = SettingsService.Instance;
+            }
+
+            return settingsService;
+        }
+    }
+
+    private void Start()
+    {
+        SyncToggleStates();
+    }
 
     public void OnShuffleButton()
     {
@@ -123,5 +148,69 @@ public class LevelCanvasManager : MonoBehaviour
         {
             Audio?.PlayInvalidSelection();
         }
+    }
+
+    public void OpenSettingsPanel()
+    {
+        if (settingsPanel == null)
+        {
+            return;
+        }
+
+        SyncToggleStates();
+        settingsPanel.SetActive(true);
+        Time.timeScale = 0f;
+        GameManager.Instance?.ForceShuffleInProgress();
+    }
+
+    public void CloseSettingsPanel()
+    {
+        settingsPanelController?.ClosePanel();
+    }
+
+    public void GoToHomeScene()
+    {
+        LoadSceneByIndex(0);
+    }
+
+    public void GoToCaseScene()
+    {
+        LoadSceneByIndex(1);
+    }
+
+    public void GoToPlayScene()
+    {
+        LoadSceneByIndex(2);
+    }
+
+    private void SyncToggleStates()
+    {
+        var service = Service;
+        if (service != null)
+        {
+            musicAnimator?.SetStateImmediate(service.MusicEnabled);
+            sfxAnimator?.SetStateImmediate(service.SfxEnabled);
+            vibrationAnimator?.SetStateImmediate(service.VibrationEnabled);
+            return;
+        }
+
+        var audio = Audio;
+        bool musicFallback = audio != null ? audio.IsMusicEnabled : PlayerSettings.MusicEnabled;
+        bool sfxFallback = audio != null ? audio.IsSfxEnabled : PlayerSettings.SfxEnabled;
+
+        musicAnimator?.SetStateImmediate(musicFallback);
+        sfxAnimator?.SetStateImmediate(sfxFallback);
+        vibrationAnimator?.SetStateImmediate(VibrationManager.IsEnabled);
+    }
+
+    private void LoadSceneByIndex(int index)
+    {
+        if (index < 0)
+        {
+            return;
+        }
+
+        Time.timeScale = 1f;
+        SceneManager.LoadScene(index);
     }
 }

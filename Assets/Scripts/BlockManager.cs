@@ -37,8 +37,28 @@ public class BlockManager : MonoBehaviour
     private Action<bool> shuffleCompletionCallback;
 
     private BoardSettings Settings => boardSettings != null ? boardSettings : gridManager?.BoardSettings;
+    private AudioManager Audio => audioManager != null ? audioManager : AudioManager.Instance;
 
     public bool HasValidMove => isValidMoveExist;
+
+    private void OnEnable()
+    {
+        RefreshAudioManagerReference();
+    }
+
+    private void Start()
+    {
+        RefreshAudioManagerReference();
+    }
+
+    private void RefreshAudioManagerReference()
+    {
+        var instance = AudioManager.Instance;
+        if (instance != null)
+        {
+            audioManager = instance;
+        }
+    }
 
     public void Initialize(GridManager grid)
     {
@@ -74,7 +94,7 @@ public class BlockManager : MonoBehaviour
 
         if (group.Count >= 2)
         {
-            audioManager?.PlayBlockSfx(block.blockType);
+            Audio?.PlayBlockSfx(block.blockType);
             foreach (var b in group)
             {
                 if (b.node != null)
@@ -93,7 +113,7 @@ public class BlockManager : MonoBehaviour
         }
 
         PlayInvalidGroupFeedback(group);
-        audioManager?.PlayInvalidSelection();
+        Audio?.PlayInvalidSelection();
         if (!fromCache)
         {
             ReleaseGroupSet(group);

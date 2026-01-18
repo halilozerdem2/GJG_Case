@@ -29,7 +29,7 @@ Transform:
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
   m_LocalPosition: {x: 0, y: 0, z: 0}
-  m_LocalScale: {x: 0.45, y: 0.4, z: 1}
+  m_LocalScale: {x: 0.45, y: 0.45, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 0}
@@ -112,7 +112,7 @@ MonoBehaviour:
   tierOneIcon: {fileID: -8923791490832965560, guid: 1c93cfb8de2ec4aff9afe5b58bdd5646, type: 3}
   tierTwoIcon: {fileID: -812536794617419617, guid: 9a2c39d330c3d4f1eae2e5368cda112a, type: 3}
   tierThreeIcon: {fileID: -2915790821876642617, guid: bfdb00cb3ab664e27af995100623367d, type: 3}
-  baseLocalScale: {x: 0.45, y: 0.4, z: 1}
+  baseLocalScale: {x: 0.45, y: 0.45, z: 1}
 --- !u!61 &9019574901115467396
 BoxCollider2D:
   m_ObjectHideFlags: 0

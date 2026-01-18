@@ -114,7 +114,6 @@ public class AudioManager : MonoBehaviour
     public void SetMusicEnabled(bool enabled)
     {
         musicEnabled = enabled;
-        PlayerSettings.MusicEnabled = enabled;
         if (musicSource != null)
         {
             musicSource.mute = !enabled;
@@ -134,7 +133,6 @@ public class AudioManager : MonoBehaviour
     public void SetSfxEnabled(bool enabled)
     {
         sfxEnabled = enabled;
-        PlayerSettings.SfxEnabled = enabled;
         if (sfxSource != null)
         {
             sfxSource.mute = !enabled;

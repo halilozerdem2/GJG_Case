@@ -126,6 +126,7 @@ public class GridManager : MonoBehaviour
                 }
 
                 node.gridPosition = new Vector2Int(x, y);
+                node.SetSortingOrder(5 + y);
                 nodes[node.gridPosition] = node;
                 nodeGrid[x, y] = node;
                 freeNodes.Add(node);
