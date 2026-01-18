@@ -35,6 +35,8 @@ public class AudioManager : MonoBehaviour
     private readonly Dictionary<int, AudioClip> clipLookup = new Dictionary<int, AudioClip>();
     private readonly Dictionary<string, SceneMusicEntry> sceneMusicLookup = new Dictionary<string, SceneMusicEntry>(StringComparer.Ordinal);
     private AudioClip currentMusicClip;
+    private bool musicEnabled = true;
+    private bool sfxEnabled = true;
 
     private void Awake()
     {
@@ -45,6 +47,9 @@ public class AudioManager : MonoBehaviour
         }
 
         Instance = this;
+        musicEnabled = PlayerSettings.MusicEnabled;
+        sfxEnabled = PlayerSettings.SfxEnabled;
+
         CacheAudioSources();
         RebuildLookup();
         RebuildMusicLookup();
@@ -63,7 +68,7 @@ public class AudioManager : MonoBehaviour
 
     public void PlayBlockSfx(int blockType)
     {
-        if (sfxSource == null)
+        if (sfxSource == null || !sfxEnabled)
         {
             return;
         }
@@ -78,7 +83,7 @@ public class AudioManager : MonoBehaviour
 
     public void PlayInvalidSelection()
     {
-        if (sfxSource == null || invalidSelectionClip == null)
+        if (sfxSource == null || invalidSelectionClip == null || !sfxEnabled)
         {
             return;
         }
@@ -106,6 +111,39 @@ public class AudioManager : MonoBehaviour
         PlayOneShot(destroySpecificClip);
     }
 
+    public void SetMusicEnabled(bool enabled)
+    {
+        musicEnabled = enabled;
+        PlayerSettings.MusicEnabled = enabled;
+        if (musicSource != null)
+        {
+            musicSource.mute = !enabled;
+            if (!enabled)
+            {
+                musicSource.Stop();
+            }
+            else if (currentMusicClip != null)
+            {
+                musicSource.clip = currentMusicClip;
+                musicSource.loop = true;
+                musicSource.Play();
+            }
+        }
+    }
+
+    public void SetSfxEnabled(bool enabled)
+    {
+        sfxEnabled = enabled;
+        PlayerSettings.SfxEnabled = enabled;
+        if (sfxSource != null)
+        {
+            sfxSource.mute = !enabled;
+        }
+    }
+
+    public bool IsMusicEnabled => musicEnabled;
+    public bool IsSfxEnabled => sfxEnabled;
+
     public void PlaySceneMusic(string sceneName)
     {
         if (string.IsNullOrEmpty(sceneName))
@@ -120,17 +158,18 @@ public class AudioManager : MonoBehaviour
             return;
         }
 
-        if (musicSource == null)
-        {
-            return;
-        }
-
-        if (currentMusicClip == entry.clip && musicSource.isPlaying)
-        {
-            return;
-        }
-
         currentMusicClip = entry.clip;
+
+        if (musicSource == null || !musicEnabled)
+        {
+            return;
+        }
+
+        if (musicSource.clip == entry.clip && musicSource.isPlaying)
+        {
+            return;
+        }
+
         musicSource.clip = entry.clip;
         musicSource.loop = true;
         musicSource.Play();
@@ -150,7 +189,7 @@ public class AudioManager : MonoBehaviour
 
     private void PlayOneShot(AudioClip clip)
     {
-        if (sfxSource == null || clip == null)
+        if (sfxSource == null || clip == null || !sfxEnabled)
         {
             return;
         }
@@ -207,6 +246,7 @@ public class AudioManager : MonoBehaviour
         {
             sfxSource.playOnAwake = false;
             sfxSource.loop = false;
+            sfxSource.mute = !sfxEnabled;
         }
 
         if (musicSource == null)
@@ -218,6 +258,11 @@ public class AudioManager : MonoBehaviour
         else
         {
             musicSource.playOnAwake = false;
+        }
+
+        if (musicSource != null)
+        {
+            musicSource.mute = !musicEnabled;
         }
     }
 
