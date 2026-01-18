@@ -63,7 +63,7 @@
 - [x] **Incremental Updates (Dirty Region Refresh)**
   - Introduce a dirty set of indices/columns impacted by the last action (blasted groups, neighbors, collapsed/refilled columns).
   - Recompute groups and icon tiers only for dirty cells while guaranteeing correctness after blast, gravity, refill, and shuffle.
-- [ ] **Rendering Layer (Keep visuals cheap and predictable)**
+- [x] **Rendering Layer (Keep visuals cheap and predictable)**
   - Choose one approach (Path A: pooled GameObjects, Path B: tilemap, Path C: single mesh) and ensure view objects become thin wrappers that simply set visuals and run animations.
   - Avoid `Transform.SetParent` churn; keep a stable parent and animate local positions.
   - Update only the indices that changed when refreshing visuals.

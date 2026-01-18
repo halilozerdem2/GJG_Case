@@ -42,17 +42,24 @@ public class Block : MonoBehaviour
 
     public void SetBlock(Node aNode, bool preserveWorldPosition = false)
     {
-        if (node != null) node.OccupiedBlock = null;
+        if (node != null)
+        {
+            node.OccupiedBlock = null;
+        }
+
         node = aNode;
-        node.OccupiedBlock = this;
-        ApplyNodeSortingOrder();
-        transform.SetParent(node.transform, preserveWorldPosition);
+        if (node != null)
+        {
+            node.OccupiedBlock = this;
+            ApplyNodeSortingOrder();
+        }
+
         transform.localRotation = Quaternion.identity;
         transform.localScale = baseLocalScale;
 
-        if (!preserveWorldPosition)
+        if (!preserveWorldPosition && node != null)
         {
-            transform.localPosition = Vector3.zero;
+            transform.localPosition = node.transform.localPosition;
         }
     }
 

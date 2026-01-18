@@ -38,6 +38,7 @@ public class BlockManager : MonoBehaviour
     private bool requireFullRefresh;
     private bool isValidMoveExist;
     private Transform blastEffectRoot;
+    private Transform blocksRoot;
     private int shuffleTweensPending;
     private bool shuffleResolutionPending;
     private Action<bool> shuffleCompletionCallback;
@@ -78,6 +79,7 @@ public class BlockManager : MonoBehaviour
         blastEffectRoot = null;
 
         PrepareBlockPool();
+        EnsureBlocksRoot();
         gridManager?.UpdateFreeNodes();
     }
 
@@ -210,14 +212,7 @@ public class BlockManager : MonoBehaviour
                         if (targetNode != null)
                         {
                             block.SetBlock(targetNode, true);
-                            if (dropDuration > 0f)
-                            {
-                                block.transform.DOLocalMove(Vector3.zero, dropDuration).SetEase(Ease.OutBounce);
-                            }
-                            else
-                            {
-                                block.transform.localPosition = Vector3.zero;
-                            }
+                            AnimateBlockToNode(block, targetNode, dropDuration, Ease.OutBounce);
 
                             targetNode.OccupiedBlock = block;
                             currentNode.OccupiedBlock = null;
@@ -353,9 +348,10 @@ public class BlockManager : MonoBehaviour
 
                 block.SetBlock(node, true);
                 SetModelCell(node.gridPosition, block.blockType);
+                Vector3 targetPosition = node.transform.localPosition;
                 if (duration > 0f)
                 {
-                    Tween tween = PlayShuffleTween(block.transform, duration);
+                    Tween tween = PlayShuffleTween(block.transform, targetPosition, duration);
                     if (tween != null)
                     {
                         powerShuffleTweens++;
@@ -367,12 +363,12 @@ public class BlockManager : MonoBehaviour
                     }
                     else
                     {
-                        block.transform.localPosition = Vector3.zero;
+                        block.transform.localPosition = targetPosition;
                     }
                 }
                 else
                 {
-                    block.transform.localPosition = Vector3.zero;
+                    block.transform.localPosition = targetPosition;
                 }
             }
         }
@@ -512,19 +508,13 @@ public class BlockManager : MonoBehaviour
                 }
 
                 SetModelCell(node.gridPosition, prefab.blockType);
-                randomBlock.SetBlock(node);
+                randomBlock.SetBlock(node, true);
                 float dropOffset = GetSpawnOffsetForRow(node.gridPosition.y);
-                randomBlock.transform.localPosition = Vector3.up * dropOffset;
+                Vector3 targetPosition = node.transform.localPosition;
+                randomBlock.transform.localPosition = targetPosition + Vector3.up * dropOffset;
                 gridManager.FreeNodes.Remove(node);
 
-                if (dropDuration > 0f)
-                {
-                    randomBlock.transform.DOLocalMove(Vector3.zero, dropDuration).SetEase(Ease.OutBounce);
-                }
-                else
-                {
-                    randomBlock.transform.localPosition = Vector3.zero;
-                }
+                AnimateBlockToNode(randomBlock, node, dropDuration, Ease.OutBounce);
             }
 
             RefreshGroupVisuals();
@@ -562,7 +552,8 @@ public class BlockManager : MonoBehaviour
             return null;
         }
 
-        return blockPool.Spawn(blockType, parent);
+        EnsureBlocksRoot();
+        return blockPool.Spawn(blockType, blocksRoot != null ? blocksRoot : parent);
     }
 
     private void ReleaseBlock(Block block)
@@ -703,7 +694,7 @@ public class BlockManager : MonoBehaviour
         dirtyCount = 0;
     }
 
-    private Tween PlayShuffleTween(Transform target, float duration)
+    private Tween PlayShuffleTween(Transform target, Vector3 targetLocalPosition, float duration)
     {
         if (target == null)
         {
@@ -713,7 +704,7 @@ public class BlockManager : MonoBehaviour
         float moveDuration = Mathf.Max(0f, duration);
         if (moveDuration <= 0f)
         {
-            target.localPosition = Vector3.zero;
+            target.localPosition = targetLocalPosition;
             return null;
         }
 
@@ -721,7 +712,7 @@ public class BlockManager : MonoBehaviour
 
         Vector3 originalScale = target.localScale;
         Sequence sequence = DOTween.Sequence();
-        sequence.Join(target.DOLocalMove(Vector3.zero, moveDuration).SetEase(Ease.OutCubic));
+        sequence.Join(target.DOLocalMove(targetLocalPosition, moveDuration).SetEase(Ease.OutCubic));
 
         float dipRatio = Mathf.Clamp01(shuffleScaleDipRatio);
         float dipAmount = Mathf.Clamp(shuffleScaleDipAmount, 0.1f, 2f);
@@ -818,6 +809,35 @@ public class BlockManager : MonoBehaviour
             target.DOPunchScale(strength, duration, vibrato: 8, elasticity: 0.5f)
                 .SetEase(Ease.OutQuad);
         }
+    }
+
+    private void SnapBlockToNode(Block block, Node node)
+    {
+        if (block == null || node == null)
+        {
+            return;
+        }
+
+        block.transform.localPosition = node.transform.localPosition;
+    }
+
+    private void AnimateBlockToNode(Block block, Node node, float duration, Ease ease)
+    {
+        if (block == null || node == null)
+        {
+            return;
+        }
+
+        Vector3 targetPosition = node.transform.localPosition;
+        float moveDuration = Mathf.Max(0f, duration);
+        if (moveDuration <= 0f)
+        {
+            block.transform.localPosition = targetPosition;
+            return;
+        }
+
+        block.transform.DOKill();
+        block.transform.DOLocalMove(targetPosition, moveDuration).SetEase(ease);
     }
 
     private Transform GetBlastEffectRoot()
@@ -922,41 +942,42 @@ public class BlockManager : MonoBehaviour
                 SwapNodeBlock(swappableNodes[i], swappableNodes[j]);
             }
 
-        for (int y = 0; y < settings.Rows; y++)
-        {
-            for (int x = 0; x < settings.Columns; x++)
+            for (int y = 0; y < settings.Rows; y++)
             {
-                Node node = nodeGrid[x, y];
-                if (node == null)
+                for (int x = 0; x < settings.Columns; x++)
                 {
-                    continue;
-                }
-
-                Block block = node.OccupiedBlock;
-                if (block == null)
-                {
-                    continue;
-                }
-
-                block.SetBlock(node, true);
-                if (blockDropDuration > 0f)
-                {
-                    Tween tween = PlayShuffleTween(block.transform, blockDropDuration);
-                    if (tween != null)
+                    Node node = nodeGrid[x, y];
+                    if (node == null)
                     {
-                        RegisterShuffleTween(tween);
+                        continue;
+                    }
+
+                    Block block = node.OccupiedBlock;
+                    if (block == null)
+                    {
+                        continue;
+                    }
+
+                    block.SetBlock(node, true);
+                    Vector3 targetPosition = node.transform.localPosition;
+                    if (blockDropDuration > 0f)
+                    {
+                        Tween tween = PlayShuffleTween(block.transform, targetPosition, blockDropDuration);
+                        if (tween != null)
+                        {
+                            RegisterShuffleTween(tween);
+                        }
+                        else
+                        {
+                            block.transform.localPosition = targetPosition;
+                        }
                     }
                     else
                     {
-                        block.transform.localPosition = Vector3.zero;
+                        block.transform.localPosition = targetPosition;
                     }
                 }
-                else
-                {
-                    block.transform.localPosition = Vector3.zero;
-                }
             }
-        }
 
             RequireFullBoardRefresh();
             return true;
@@ -1177,7 +1198,7 @@ public class BlockManager : MonoBehaviour
 
         spawned.SetBlock(targetNode);
         SetModelCell(targetNode.gridPosition, blockType);
-        spawned.transform.localPosition = Vector3.zero;
+        SnapBlockToNode(spawned, targetNode);
         gridManager?.FreeNodes.Remove(targetNode);
         return spawned;
     }
@@ -1429,6 +1450,22 @@ public class BlockManager : MonoBehaviour
         boardModel.Configure(settings.Columns, settings.Rows);
         EnsureGroupBuffers();
         RequireFullBoardRefresh();
+        EnsureBlocksRoot();
+    }
+
+    private void EnsureBlocksRoot()
+    {
+        Transform desiredParent = gridManager != null ? gridManager.GridRoot : transform;
+        if (blocksRoot == null)
+        {
+            GameObject container = new GameObject("BlocksRoot");
+            blocksRoot = container.transform;
+        }
+
+        if (blocksRoot.parent != desiredParent)
+        {
+            blocksRoot.SetParent(desiredParent, false);
+        }
     }
 
     private void SetModelCell(Vector2Int gridPosition, int blockType, byte iconTier = 0)
