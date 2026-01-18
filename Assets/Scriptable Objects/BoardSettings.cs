@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using UnityEngine;
 
 [CreateAssetMenu(fileName = "BoardSettings", menuName = "Scriptable Objects/BoardSettings")]
@@ -74,6 +75,11 @@ public class BoardSettings : ScriptableObject
             }
         }
 
+        if (!ValidateBlockPrefabs(out message))
+        {
+            return false;
+        }
+
         if (blastEffectPrefabs == null || blastEffectPrefabs.Length != colors)
         {
             message = "Blast effect array length must match color count.";
@@ -118,6 +124,72 @@ public class BoardSettings : ScriptableObject
         return null;
     }
 
+    private bool ValidateBlockPrefabs(out string message)
+    {
+        message = string.Empty;
+        if (blockPrefabs == null || blockPrefabs.Length == 0)
+        {
+            message = "No block prefabs assigned.";
+            return false;
+        }
+
+        Dictionary<Sprite, string> defaultIcons = new Dictionary<Sprite, string>();
+        Dictionary<Sprite, string> tierOneIcons = new Dictionary<Sprite, string>();
+        Dictionary<Sprite, string> tierTwoIcons = new Dictionary<Sprite, string>();
+        Dictionary<Sprite, string> tierThreeIcons = new Dictionary<Sprite, string>();
+
+        foreach (Block prefab in blockPrefabs)
+        {
+            if (prefab == null)
+            {
+                continue;
+            }
+
+            string ownerName = prefab.name;
+            if (!TryRegisterSprite(prefab.DefaultIcon, ownerName, "default icon", defaultIcons, out message))
+            {
+                return false;
+            }
+
+            if (!TryRegisterSprite(prefab.TierOneIcon, ownerName, "tier 1 icon", tierOneIcons, out message))
+            {
+                return false;
+            }
+
+            if (!TryRegisterSprite(prefab.TierTwoIcon, ownerName, "tier 2 icon", tierTwoIcons, out message))
+            {
+                return false;
+            }
+
+            if (!TryRegisterSprite(prefab.TierThreeIcon, ownerName, "tier 3 icon", tierThreeIcons, out message))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private bool TryRegisterSprite(Sprite sprite, string owner, string label,
+        Dictionary<Sprite, string> existingOwners, out string message)
+    {
+        if (sprite == null)
+        {
+            message = $"{owner} is missing its {label}.";
+            return false;
+        }
+
+        if (existingOwners.TryGetValue(sprite, out string otherOwner) && otherOwner != owner)
+        {
+            message = $"{owner} reuses the {label} already assigned to {otherOwner}.";
+            return false;
+        }
+
+        existingOwners[sprite] = owner;
+        message = string.Empty;
+        return true;
+    }
+
 #if UNITY_EDITOR
     private void OnValidate()
     {
@@ -139,6 +211,11 @@ public class BoardSettings : ScriptableObject
         if (blastEffectPrefabs == null || blastEffectPrefabs.Length != colors)
         {
             Array.Resize(ref blastEffectPrefabs, colors);
+        }
+
+        if (!Application.isPlaying && !ValidateBlockPrefabs(out string validationMessage) && !string.IsNullOrEmpty(validationMessage))
+        {
+            Debug.LogWarning($"BoardSettings validation warning: {validationMessage}", this);
         }
     }
 #endif

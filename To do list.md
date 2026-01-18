@@ -40,7 +40,7 @@
 - [x] **Deadlock Shuffle Fallback**
   - When `TryShuffleBoard` can’t find any color pair, provide a deterministic fallback (regenerate the board, reduce K, or spawn guaranteed pairs) so the game never loops in the `Deadlock` state.
 
-- [ ] **Prefab Icon Validation**
+- [x] **Prefab Icon Validation**
   - Extend editor-time validation to ensure every `Block` prefab has all four sprite tiers assigned and that sprites are not duplicated across colors, keeping the “unique icons per color/group size” promise.
 
 - [ ] **Flood-Fill Allocation Reduction**
@@ -48,3 +48,8 @@
 
 - [ ] **Spawn List Reuse**
   - Replace the `FreeNodes.ToList()` call in `SpawnBlocksCoroutine` with a cached list or direct iteration to avoid repeated GC spikes during mass refills.
+
+## Bugs
+
+- [ ] **Shuffle Scale Drift**
+  - Repeatedly pressing Shuffle while animations play leaves blocks progressively smaller once they settle back, accumulating scale loss over time.

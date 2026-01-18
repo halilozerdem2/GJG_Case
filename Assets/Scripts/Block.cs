@@ -14,6 +14,11 @@ public class Block : MonoBehaviour
     [SerializeField] private Sprite tierThreeIcon;
     [SerializeField] private Vector3 baseLocalScale = Vector3.one;
 
+    public Sprite DefaultIcon => defaultIcon;
+    public Sprite TierOneIcon => tierOneIcon;
+    public Sprite TierTwoIcon => tierTwoIcon;
+    public Sprite TierThreeIcon => tierThreeIcon;
+
     private void Awake()
     {
         CacheRendererAndScale();
