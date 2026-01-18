@@ -30,6 +30,7 @@ public class BlockManager : MonoBehaviour
     private readonly HashSet<HashSet<Block>> uniqueGroupCollector = new HashSet<HashSet<Block>>();
     private readonly HashSet<Block> processedBlocks = new HashSet<Block>();
     private readonly List<Node> nodesToFillBuffer = new List<Node>(64);
+    private BoardModel boardModel = new BoardModel();
     private bool isValidMoveExist;
     private Transform blastEffectRoot;
     private int shuffleTweensPending;
@@ -40,6 +41,7 @@ public class BlockManager : MonoBehaviour
     private AudioManager Audio => audioManager != null ? audioManager : AudioManager.Instance;
 
     public bool HasValidMove => isValidMoveExist;
+    public BoardModel BoardModel => boardModel;
 
     private void OnEnable()
     {
@@ -63,6 +65,7 @@ public class BlockManager : MonoBehaviour
     public void Initialize(GridManager grid)
     {
         gridManager = grid != null ? grid : gridManager;
+        ConfigureBoardModel();
         ClearCachedGroups();
         isValidMoveExist = false;
         shuffleTweensPending = 0;
@@ -99,6 +102,7 @@ public class BlockManager : MonoBehaviour
             {
                 if (b.node != null)
                 {
+                    ClearModelCell(b.node.gridPosition);
                     b.node.OccupiedBlock = null;
                     gridManager.FreeNodes.Add(b.node);
                 }
@@ -132,7 +136,7 @@ public class BlockManager : MonoBehaviour
         {
             Node[,] nodeGrid = gridManager.NodeGrid;
             BoardSettings settings = Settings;
-            if (nodeGrid == null || settings == null)
+            if (nodeGrid == null || settings == null || boardModel == null)
             {
                 return;
             }
@@ -143,18 +147,40 @@ public class BlockManager : MonoBehaviour
                 int writeIndex = 0;
                 for (int y = 0; y < settings.Rows; y++)
                 {
-                    Node currentNode = nodeGrid[x, y];
-                    if (currentNode == null)
+                    int fromIndex = boardModel.Index(x, y);
+                    if (fromIndex < 0)
                     {
                         continue;
                     }
 
-                    Block block = currentNode.OccupiedBlock;
-                    if (block != null)
+                    Node currentNode = nodeGrid[x, y];
+                    if (currentNode == null)
                     {
-                        if (y != writeIndex)
+                        boardModel.ClearCell(fromIndex);
+                        continue;
+                    }
+
+                    Block block = currentNode.OccupiedBlock;
+                    if (block == null)
+                    {
+                        boardModel.ClearCell(fromIndex);
+                        continue;
+                    }
+
+                    if (!boardModel.IsOccupied(fromIndex))
+                    {
+                        boardModel.SetCell(fromIndex, ToColorId(block.blockType));
+                    }
+
+                    if (y != writeIndex)
+                    {
+                        int targetIndex = boardModel.Index(x, writeIndex);
+                        boardModel.CopyCell(fromIndex, targetIndex);
+                        boardModel.ClearCell(fromIndex);
+
+                        Node targetNode = nodeGrid[x, writeIndex];
+                        if (targetNode != null)
                         {
-                            Node targetNode = nodeGrid[x, writeIndex];
                             block.SetBlock(targetNode, true);
                             if (dropDuration > 0f)
                             {
@@ -170,8 +196,17 @@ public class BlockManager : MonoBehaviour
                             gridManager.FreeNodes.Add(currentNode);
                             gridManager.FreeNodes.Remove(targetNode);
                         }
+                    }
 
-                        writeIndex++;
+                    writeIndex++;
+                }
+
+                for (int y = writeIndex; y < settings.Rows; y++)
+                {
+                    int emptyIndex = boardModel.Index(x, y);
+                    if (emptyIndex >= 0)
+                    {
+                        boardModel.ClearCell(emptyIndex);
                     }
                 }
             }
@@ -245,6 +280,7 @@ public class BlockManager : MonoBehaviour
                 }
 
                 node.OccupiedBlock = null;
+                ClearModelCell(node.gridPosition);
             }
         }
 
@@ -284,10 +320,12 @@ public class BlockManager : MonoBehaviour
                 Block block = blocks[blockIndex++];
                 if (block == null)
                 {
+                    ClearModelCell(node.gridPosition);
                     continue;
                 }
 
                 block.SetBlock(node, true);
+                SetModelCell(node.gridPosition, block.blockType);
                 if (duration > 0f)
                 {
                     Tween tween = PlayShuffleTween(block.transform, duration);
@@ -345,6 +383,10 @@ public class BlockManager : MonoBehaviour
             PlayBlockBlastEffect(block);
             ReleaseBlock(block);
             node.OccupiedBlock = null;
+            if (node != null)
+            {
+                ClearModelCell(node.gridPosition);
+            }
             anyDestroyed = true;
         }
 
@@ -378,6 +420,10 @@ public class BlockManager : MonoBehaviour
             PlayBlockBlastEffect(block);
             ReleaseBlock(block);
             node.OccupiedBlock = null;
+            if (node != null)
+            {
+                ClearModelCell(node.gridPosition);
+            }
             blockGroups.Remove(block);
             destroyedAny = true;
         }
@@ -423,13 +469,24 @@ public class BlockManager : MonoBehaviour
 
             foreach (var node in nodesToFillBuffer)
             {
+                if (node == null)
+                {
+                    continue;
+                }
+
                 Block prefab = settings.BlockPrefabs[Random.Range(0, settings.BlockPrefabs.Length)];
+                if (prefab == null)
+                {
+                    continue;
+                }
+
                 Block randomBlock = SpawnBlockFromPool(prefab.blockType, node.transform);
                 if (randomBlock == null)
                 {
                     continue;
                 }
 
+                SetModelCell(node.gridPosition, prefab.blockType);
                 randomBlock.SetBlock(node);
                 float dropOffset = GetSpawnOffsetForRow(node.gridPosition.y);
                 randomBlock.transform.localPosition = Vector3.up * dropOffset;
@@ -856,6 +913,8 @@ public class BlockManager : MonoBehaviour
         {
             sourceBlock.node = destination;
         }
+
+        SwapModelCells(source.gridPosition, destination.gridPosition);
     }
 
     private void CompleteShuffle()
@@ -970,6 +1029,7 @@ public class BlockManager : MonoBehaviour
             node.OccupiedBlock = null;
         }
 
+        boardModel?.Clear();
         gridManager.UpdateFreeNodes();
 
         Vector2Int forcedPairA = new Vector2Int(0, 0);
@@ -1023,8 +1083,75 @@ public class BlockManager : MonoBehaviour
         }
 
         spawned.SetBlock(targetNode);
+        SetModelCell(targetNode.gridPosition, blockType);
         spawned.transform.localPosition = Vector3.zero;
         gridManager?.FreeNodes.Remove(targetNode);
         return spawned;
+    }
+
+    private void ConfigureBoardModel()
+    {
+        boardModel ??= new BoardModel();
+        BoardSettings settings = Settings;
+        if (settings == null)
+        {
+            boardModel.Configure(0, 0);
+            return;
+        }
+
+        boardModel.Configure(settings.Columns, settings.Rows);
+    }
+
+    private void SetModelCell(Vector2Int gridPosition, int blockType, byte iconTier = 0)
+    {
+        if (boardModel == null)
+        {
+            return;
+        }
+
+        int index = boardModel.Index(gridPosition.x, gridPosition.y);
+        if (index < 0)
+        {
+            return;
+        }
+
+        boardModel.SetCell(index, ToColorId(blockType), iconTier, true);
+    }
+
+    private void ClearModelCell(Vector2Int gridPosition)
+    {
+        if (boardModel == null)
+        {
+            return;
+        }
+
+        int index = boardModel.Index(gridPosition.x, gridPosition.y);
+        if (index >= 0)
+        {
+            boardModel.ClearCell(index);
+        }
+    }
+
+    private void SwapModelCells(Vector2Int positionA, Vector2Int positionB)
+    {
+        if (boardModel == null)
+        {
+            return;
+        }
+
+        int indexA = boardModel.Index(positionA.x, positionA.y);
+        int indexB = boardModel.Index(positionB.x, positionB.y);
+        if (indexA < 0 || indexB < 0)
+        {
+            return;
+        }
+
+        boardModel.SwapCells(indexA, indexB);
+    }
+
+    private static byte ToColorId(int blockType)
+    {
+        int clamped = Mathf.Clamp(blockType, 0, byte.MaxValue);
+        return (byte)clamped;
     }
 }
