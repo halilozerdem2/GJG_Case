@@ -2,6 +2,12 @@
 
 ## Phase 1 — Case Study Implementation (Completed)
 
+### Beklenen Performans Kazanımları
+- CPU: ~%20 düşüş (deterministic flood fill + O(M*N) gravity).
+- GPU: ~%15 daha az draw call (tek atlas + batch).
+- GC/Memory: <0.5 KB/frame hedefi (object pool + koleksiyon hijyeni).
+
+
 ### Core Tasks
 - [x] **Board Configuration & Validation**
   - Replace the loose `_width`, `_height`, and `blockTypes` fields with a single configuration data source (ScriptableObject or serialized settings struct).
@@ -47,6 +53,12 @@
 
 ## Phase 2 — Performance-First Refactor (Next Iteration)
 
+### Phase 2 Performans Hedefleri
+- CPU: ek ~%15 düşüş (BoardModel BFS + dirty bölgeler + move listeleri).
+- GPU: 20-25 draw call tavanı (tek atlas/Tilemap/mesh).
+- GC/Memory: oyun döngüsünde 0 GC alloc, istikrarlı bellek kullanımı.
+
+
 - [ ] **Acceptance Criteria (Must-have metrics)**
   - Zero GC Alloc during gameplay loop (tap → blast → drop → refill → icon refresh).
   - Stable frame time under stress (mass blast + full refill) on target mobile profile.
@@ -67,13 +79,13 @@
   - Choose one approach (Path A: pooled GameObjects, Path B: tilemap, Path C: single mesh) and ensure view objects become thin wrappers that simply set visuals and run animations.
   - Avoid `Transform.SetParent` churn; keep a stable parent and animate local positions.
   - Update only the indices that changed when refreshing visuals.
-- [ ] **Gravity/Refill Optimization (Model-first, view-second)**
+- [x] **Gravity/Refill Optimization (Model-first, view-second)**
   - Implement column compaction in the model using a per-column write pointer.
   - Produce a move list `(fromIndex -> toIndex)` plus spawned indices, and drive animations strictly from that data.
-- [ ] **Deadlock Handling (Deterministic & Low Cost)**
+- [x] **Deadlock Handling (Deterministic & Low Cost)**
   - Keep the guaranteed-pair philosophy but detect deadlocks using only the model (no cached group structures).
   - After shuffling, run a single-pass guarantee patch that performs the minimal swap required to introduce a pair if none exists.
-- [ ] **Tween/Animation Budget (Reduce per-block allocations)**
+- [x] **Tween/Animation Budget (Reduce per-block allocations)**
   - Replace per-block DOTween sequences in hot paths with a lightweight custom tween runner or simplified DOTween usage (no nested sequences).
   - Fix shuffle scale drift permanently by storing an immutable `baseScale` per block and always animating relative to it.
 - [ ] **Grid/Node Lifecycle (Eliminate regenerate spikes)**

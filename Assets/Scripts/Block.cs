@@ -18,6 +18,7 @@ public class Block : MonoBehaviour
     public Sprite TierOneIcon => tierOneIcon;
     public Sprite TierTwoIcon => tierTwoIcon;
     public Sprite TierThreeIcon => tierThreeIcon;
+    public Vector3 BaseLocalScale => baseLocalScale;
 
     private void Awake()
     {

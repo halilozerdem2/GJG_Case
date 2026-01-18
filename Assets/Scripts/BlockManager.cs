@@ -23,7 +23,12 @@ public class BlockManager : MonoBehaviour
     private static readonly ProfilerMarker SpawnBlocksMarker = new ProfilerMarker("BlockManager.SpawnBlocks");
     private static readonly ProfilerMarker ShuffleMarker = new ProfilerMarker("BlockManager.TryShuffleBoard");
 
-    private readonly List<Node> nodesToFillBuffer = new List<Node>(64);
+    private const int MaxColorIds = 256;
+    private readonly List<BlockMove> blockMoves = new List<BlockMove>(64);
+    private readonly List<int> pendingSpawnIndices = new List<int>(64);
+    private readonly List<BlockAnimation> activeAnimations = new List<BlockAnimation>(128);
+    private readonly int[] colorFirstIndex = new int[MaxColorIds];
+    private readonly int[] colorSecondIndex = new int[MaxColorIds];
     private BoardModel boardModel = new BoardModel();
     private int[] bfsQueue;
     private int[] groupIndicesBuffer;
@@ -81,6 +86,12 @@ public class BlockManager : MonoBehaviour
         PrepareBlockPool();
         EnsureBlocksRoot();
         gridManager?.UpdateFreeNodes();
+        QueueAllNodesForSpawn();
+    }
+
+    private void Update()
+    {
+        UpdateBlockAnimations(Time.deltaTime);
     }
 
     public void SpawnBlocks(Action<bool> onCompleted)
@@ -170,7 +181,9 @@ public class BlockManager : MonoBehaviour
                 return;
             }
 
-            float dropDuration = Mathf.Max(0f, blockDropDuration);
+            blockMoves.Clear();
+            pendingSpawnIndices.Clear();
+
             for (int x = 0; x < settings.Columns; x++)
             {
                 int writeIndex = 0;
@@ -196,29 +209,22 @@ public class BlockManager : MonoBehaviour
                         continue;
                     }
 
-                    if (!boardModel.IsOccupied(fromIndex))
-                    {
-                        SetModelCell(fromIndex, block.blockType);
-                    }
-
                     if (y != writeIndex)
                     {
                         int targetIndex = boardModel.Index(x, writeIndex);
-                        boardModel.CopyCell(fromIndex, targetIndex);
-                        MarkDirtyCell(targetIndex, includeNeighbours: true);
-                        ClearModelCell(fromIndex);
-
-                        Node targetNode = nodeGrid[x, writeIndex];
-                        if (targetNode != null)
+                        blockMoves.Add(new BlockMove
                         {
-                            block.SetBlock(targetNode, true);
-                            AnimateBlockToNode(block, targetNode, dropDuration, Ease.OutBounce);
+                            fromIndex = fromIndex,
+                            toIndex = targetIndex,
+                            block = block
+                        });
 
-                            targetNode.OccupiedBlock = block;
-                            currentNode.OccupiedBlock = null;
-                            gridManager.FreeNodes.Add(currentNode);
-                            gridManager.FreeNodes.Remove(targetNode);
-                        }
+                        SetModelCell(targetIndex, block.blockType);
+                        ClearModelCell(fromIndex);
+                    }
+                    else
+                    {
+                        SetModelCell(fromIndex, block.blockType);
                     }
 
                     writeIndex++;
@@ -230,9 +236,33 @@ public class BlockManager : MonoBehaviour
                     if (emptyIndex >= 0)
                     {
                         ClearModelCell(emptyIndex);
+                        pendingSpawnIndices.Add(emptyIndex);
                     }
                 }
             }
+
+            float dropDuration = Mathf.Max(0f, blockDropDuration);
+            foreach (var move in blockMoves)
+            {
+                Node sourceNode = GetNodeFromIndex(move.fromIndex);
+                Node targetNode = GetNodeFromIndex(move.toIndex);
+                Block block = move.block;
+                if (block == null || targetNode == null)
+                {
+                    continue;
+                }
+
+                if (sourceNode != null)
+                {
+                    sourceNode.OccupiedBlock = null;
+                }
+
+                block.SetBlock(targetNode, true);
+                AnimateBlockToNode(block, targetNode, dropDuration, AnimationEase.OutBounce);
+                targetNode.OccupiedBlock = block;
+            }
+
+            blockMoves.Clear();
 
             gridManager.UpdateFreeNodes();
             RefreshGroupVisuals();
@@ -348,27 +378,20 @@ public class BlockManager : MonoBehaviour
 
                 block.SetBlock(node, true);
                 SetModelCell(node.gridPosition, block.blockType);
-                Vector3 targetPosition = node.transform.localPosition;
                 if (duration > 0f)
                 {
-                    Tween tween = PlayShuffleTween(block.transform, targetPosition, duration);
-                    if (tween != null)
+                    powerShuffleTweens++;
+                    AnimateBlockToNode(block, node, duration, AnimationEase.OutCubic, () =>
                     {
-                        powerShuffleTweens++;
-                        tween.OnComplete(() =>
-                        {
-                            powerShuffleTweens = Mathf.Max(0, powerShuffleTweens - 1);
-                            TryCompletePowerShuffle();
-                        });
-                    }
-                    else
-                    {
-                        block.transform.localPosition = targetPosition;
-                    }
+                        powerShuffleTweens = Mathf.Max(0, powerShuffleTweens - 1);
+                        TryCompletePowerShuffle();
+                    });
+                    AnimateScaleDip(block, duration);
                 }
                 else
                 {
-                    block.transform.localPosition = targetPosition;
+                    AnimateBlockToNode(block, node, 0f, AnimationEase.Linear);
+                    AnimateScaleDip(block, 0f);
                 }
             }
         }
@@ -414,6 +437,7 @@ public class BlockManager : MonoBehaviour
 
         gridManager.UpdateFreeNodes();
         RefreshGroupVisuals();
+        QueueAllNodesForSpawn();
         return anyDestroyed;
     }
 
@@ -472,14 +496,6 @@ public class BlockManager : MonoBehaviour
         using (SpawnBlocksMarker.Auto())
         {
             gridManager.UpdateFreeNodes();
-            nodesToFillBuffer.Clear();
-            foreach (var node in gridManager.FreeNodes)
-            {
-                if (node != null)
-                {
-                    nodesToFillBuffer.Add(node);
-                }
-            }
             float dropDuration = Mathf.Max(0f, blockDropDuration);
             BoardSettings settings = Settings;
             if (settings == null)
@@ -488,8 +504,16 @@ public class BlockManager : MonoBehaviour
                 yield break;
             }
 
-            foreach (var node in nodesToFillBuffer)
+            if (pendingSpawnIndices.Count == 0)
             {
+                RefreshGroupVisuals();
+                onCompleted?.Invoke(isValidMoveExist);
+                yield break;
+            }
+
+            foreach (var index in pendingSpawnIndices)
+            {
+                Node node = GetNodeFromIndex(index);
                 if (node == null)
                 {
                     continue;
@@ -514,12 +538,13 @@ public class BlockManager : MonoBehaviour
                 randomBlock.transform.localPosition = targetPosition + Vector3.up * dropOffset;
                 gridManager.FreeNodes.Remove(node);
 
-                AnimateBlockToNode(randomBlock, node, dropDuration, Ease.OutBounce);
+                AnimateBlockToNode(randomBlock, node, dropDuration, AnimationEase.OutBounce);
             }
 
+            pendingSpawnIndices.Clear();
+            gridManager.UpdateFreeNodes();
             RefreshGroupVisuals();
             onCompleted?.Invoke(isValidMoveExist);
-            nodesToFillBuffer.Clear();
         }
     }
 
@@ -677,60 +702,9 @@ public class BlockManager : MonoBehaviour
             }
         }
 
-        isValidMoveExist = false;
-        if (cachedGroupSizes != null)
-        {
-            int limit = Mathf.Min(cachedGroupSizes.Length, boardModel.CellCount);
-            for (int i = 0; i < limit; i++)
-            {
-                if (cachedGroupSizes[i] >= 2)
-                {
-                    isValidMoveExist = true;
-                    break;
-                }
-            }
-        }
+        isValidMoveExist = ModelHasValidMove();
 
         dirtyCount = 0;
-    }
-
-    private Tween PlayShuffleTween(Transform target, Vector3 targetLocalPosition, float duration)
-    {
-        if (target == null)
-        {
-            return null;
-        }
-
-        float moveDuration = Mathf.Max(0f, duration);
-        if (moveDuration <= 0f)
-        {
-            target.localPosition = targetLocalPosition;
-            return null;
-        }
-
-        target.DOKill();
-
-        Vector3 originalScale = target.localScale;
-        Sequence sequence = DOTween.Sequence();
-        sequence.Join(target.DOLocalMove(targetLocalPosition, moveDuration).SetEase(Ease.OutCubic));
-
-        float dipRatio = Mathf.Clamp01(shuffleScaleDipRatio);
-        float dipAmount = Mathf.Clamp(shuffleScaleDipAmount, 0.1f, 2f);
-        if (!Mathf.Approximately(dipAmount, 1f) && dipRatio > 0f && dipRatio < 1f)
-        {
-            float dipDuration = moveDuration * dipRatio;
-            float recoverDuration = Mathf.Max(0.01f, moveDuration - dipDuration);
-            Sequence scaleSequence = DOTween.Sequence();
-            scaleSequence.Append(target.DOScale(originalScale * dipAmount, dipDuration).SetEase(Ease.OutSine));
-            scaleSequence.Append(target.DOScale(originalScale, recoverDuration).SetEase(Ease.OutBack));
-            sequence.Join(scaleSequence);
-        }
-        else
-        {
-            sequence.Join(target.DOScale(originalScale, moveDuration).SetEase(Ease.OutBack));
-        }
-
-        return sequence;
     }
 
     private void PlayBlockBlastEffect(Block block)
@@ -818,26 +792,90 @@ public class BlockManager : MonoBehaviour
             return;
         }
 
+        StopAnimation(block.transform, AnimationType.Position);
         block.transform.localPosition = node.transform.localPosition;
     }
 
-    private void AnimateBlockToNode(Block block, Node node, float duration, Ease ease)
+    private void AnimateBlockToNode(Block block, Node node, float duration, AnimationEase ease,
+        Action onComplete = null)
+    {
+        if (block == null || node == null)
+        {
+            onComplete?.Invoke();
+            return;
+        }
+
+        Vector3 targetPosition = node.transform.localPosition;
+        if (duration <= 0f)
+        {
+            StopAnimation(block.transform, AnimationType.Position);
+            block.transform.localPosition = targetPosition;
+            onComplete?.Invoke();
+            return;
+        }
+
+        StartBlockAnimation(block.transform, targetPosition, duration, ease, AnimationType.Position, onComplete);
+    }
+
+    private void AnimateScaleDip(Block block, float duration)
+    {
+        if (block == null)
+        {
+            return;
+        }
+
+        Vector3 baseScale = block.BaseLocalScale;
+        StopAnimation(block.transform, AnimationType.Scale);
+        ApplyAnimationValue(block.transform, AnimationType.Scale, baseScale);
+
+        float clampedDuration = Mathf.Max(0f, duration);
+        if (clampedDuration <= 0f)
+        {
+            return;
+        }
+
+        float dipRatio = Mathf.Clamp01(shuffleScaleDipRatio);
+        float dipAmount = Mathf.Clamp(shuffleScaleDipAmount, 0.1f, 2f);
+        if (Mathf.Approximately(dipAmount, 1f) || dipRatio <= 0f || dipRatio >= 1f)
+        {
+            StartBlockAnimation(block.transform, baseScale, clampedDuration, AnimationEase.OutBack, AnimationType.Scale, null);
+            return;
+        }
+
+        float dipDuration = Mathf.Max(0.01f, clampedDuration * dipRatio);
+        float recoverDuration = Mathf.Max(0.01f, clampedDuration - dipDuration);
+        Vector3 dipScale = baseScale * dipAmount;
+
+        StartBlockAnimation(block.transform, dipScale, dipDuration, AnimationEase.OutSine, AnimationType.Scale, () =>
+        {
+            StartBlockAnimation(block.transform, baseScale, recoverDuration, AnimationEase.OutBack, AnimationType.Scale, null);
+        });
+    }
+
+    private void AnimateBlockScale(Block block, Vector3 targetScale, float duration, AnimationEase ease)
+    {
+        if (block == null)
+        {
+            return;
+        }
+
+        StartBlockAnimation(block.transform, targetScale, duration, ease, AnimationType.Scale, null);
+    }
+
+    private void AnimateShuffleBlock(Block block, Node node, float duration)
     {
         if (block == null || node == null)
         {
             return;
         }
 
-        Vector3 targetPosition = node.transform.localPosition;
-        float moveDuration = Mathf.Max(0f, duration);
-        if (moveDuration <= 0f)
+        shuffleTweensPending++;
+        AnimateBlockToNode(block, node, duration, AnimationEase.OutCubic, () =>
         {
-            block.transform.localPosition = targetPosition;
-            return;
-        }
-
-        block.transform.DOKill();
-        block.transform.DOLocalMove(targetPosition, moveDuration).SetEase(ease);
+            shuffleTweensPending = Mathf.Max(0, shuffleTweensPending - 1);
+            TryResolveShuffleTweens();
+        });
+        AnimateScaleDip(block, duration);
     }
 
     private Transform GetBlastEffectRoot()
@@ -942,6 +980,20 @@ public class BlockManager : MonoBehaviour
                 SwapNodeBlock(swappableNodes[i], swappableNodes[j]);
             }
 
+            if (!ModelHasValidMove())
+            {
+                bool guaranteed = TryGuaranteeMove(nodeGrid, settings);
+                if (!guaranteed || !ModelHasValidMove())
+                {
+                    bool regenerated = RegenerateBoardWithGuaranteedPairs(nodeGrid, settings);
+                    if (regenerated)
+                    {
+                        RequireFullBoardRefresh();
+                    }
+                    return regenerated;
+                }
+            }
+
             for (int y = 0; y < settings.Rows; y++)
             {
                 for (int x = 0; x < settings.Columns; x++)
@@ -959,22 +1011,14 @@ public class BlockManager : MonoBehaviour
                     }
 
                     block.SetBlock(node, true);
-                    Vector3 targetPosition = node.transform.localPosition;
                     if (blockDropDuration > 0f)
                     {
-                        Tween tween = PlayShuffleTween(block.transform, targetPosition, blockDropDuration);
-                        if (tween != null)
-                        {
-                            RegisterShuffleTween(tween);
-                        }
-                        else
-                        {
-                            block.transform.localPosition = targetPosition;
-                        }
+                        AnimateShuffleBlock(block, node, blockDropDuration);
                     }
                     else
                     {
-                        block.transform.localPosition = targetPosition;
+                        AnimateBlockToNode(block, node, 0f, AnimationEase.Linear);
+                        AnimateScaleDip(block, 0f);
                     }
                 }
             }
@@ -1080,21 +1124,6 @@ public class BlockManager : MonoBehaviour
         shuffleCompletionCallback?.Invoke(isValidMoveExist);
     }
 
-    private void RegisterShuffleTween(Tween tween)
-    {
-        if (tween == null)
-        {
-            return;
-        }
-
-        shuffleTweensPending++;
-        tween.OnComplete(() =>
-        {
-            shuffleTweensPending = Mathf.Max(0, shuffleTweensPending - 1);
-            TryResolveShuffleTweens();
-        });
-    }
-
     private void TryResolveShuffleTweens()
     {
         if (!shuffleResolutionPending || shuffleTweensPending > 0)
@@ -1116,6 +1145,8 @@ public class BlockManager : MonoBehaviour
         {
             PrepareBlockPool();
         }
+
+        pendingSpawnIndices.Clear();
 
         Block[] prefabs = settings.BlockPrefabs;
         if (prefabs == null || prefabs.Length == 0)
@@ -1444,12 +1475,14 @@ public class BlockManager : MonoBehaviour
         {
             boardModel.Configure(0, 0);
             RequireFullBoardRefresh();
+            QueueAllNodesForSpawn();
             return;
         }
 
         boardModel.Configure(settings.Columns, settings.Rows);
         EnsureGroupBuffers();
         RequireFullBoardRefresh();
+        QueueAllNodesForSpawn();
         EnsureBlocksRoot();
     }
 
@@ -1465,6 +1498,34 @@ public class BlockManager : MonoBehaviour
         if (blocksRoot.parent != desiredParent)
         {
             blocksRoot.SetParent(desiredParent, false);
+        }
+    }
+
+    private void QueueAllNodesForSpawn()
+    {
+        pendingSpawnIndices.Clear();
+        if (boardModel == null || gridManager == null)
+        {
+            return;
+        }
+
+        int columns = boardModel.Columns;
+        int rows = boardModel.Rows;
+        if (columns <= 0 || rows <= 0)
+        {
+            return;
+        }
+
+        for (int x = 0; x < columns; x++)
+        {
+            for (int y = 0; y < rows; y++)
+            {
+                int index = boardModel.Index(x, y);
+                if (index >= 0)
+                {
+                    pendingSpawnIndices.Add(index);
+                }
+            }
         }
     }
 
@@ -1535,5 +1596,396 @@ public class BlockManager : MonoBehaviour
     {
         int clamped = Mathf.Clamp(blockType, 0, byte.MaxValue);
         return (byte)clamped;
+    }
+
+    private void StartBlockAnimation(Transform target, Vector3 endValue, float duration, AnimationEase ease,
+        AnimationType type, Action onComplete)
+    {
+        if (target == null)
+        {
+            onComplete?.Invoke();
+            return;
+        }
+
+        float clampedDuration = Mathf.Max(0f, duration);
+        if (clampedDuration <= 0f)
+        {
+            ApplyAnimationValue(target, type, endValue);
+            onComplete?.Invoke();
+            return;
+        }
+
+        for (int i = 0; i < activeAnimations.Count; i++)
+        {
+            if (activeAnimations[i].target == target && activeAnimations[i].type == type)
+            {
+                activeAnimations[i] = new BlockAnimation
+                {
+                    target = target,
+                    start = GetCurrentValue(target, type),
+                    end = endValue,
+                    duration = clampedDuration,
+                    elapsed = 0f,
+                    ease = ease,
+                    type = type,
+                    onComplete = onComplete
+                };
+                return;
+            }
+        }
+
+        activeAnimations.Add(new BlockAnimation
+        {
+            target = target,
+            start = GetCurrentValue(target, type),
+            end = endValue,
+            duration = clampedDuration,
+            elapsed = 0f,
+            ease = ease,
+            type = type,
+            onComplete = onComplete
+        });
+    }
+
+    private Vector3 GetCurrentValue(Transform target, AnimationType type)
+    {
+        return type == AnimationType.Scale ? target.localScale : target.localPosition;
+    }
+
+    private void ApplyAnimationValue(Transform target, AnimationType type, Vector3 value)
+    {
+        if (type == AnimationType.Scale)
+        {
+            target.localScale = value;
+        }
+        else
+        {
+            target.localPosition = value;
+        }
+    }
+
+    private void StopAnimation(Transform target, AnimationType type)
+    {
+        if (target == null)
+        {
+            return;
+        }
+
+        for (int i = activeAnimations.Count - 1; i >= 0; i--)
+        {
+            if (activeAnimations[i].target == target && activeAnimations[i].type == type)
+            {
+                activeAnimations.RemoveAt(i);
+            }
+        }
+    }
+
+    private void UpdateBlockAnimations(float deltaTime)
+    {
+        if (activeAnimations.Count == 0)
+        {
+            return;
+        }
+
+        for (int i = activeAnimations.Count - 1; i >= 0; i--)
+        {
+            BlockAnimation anim = activeAnimations[i];
+            Transform target = anim.target;
+            if (target == null)
+            {
+                activeAnimations.RemoveAt(i);
+                continue;
+            }
+
+            anim.elapsed += deltaTime;
+            float t = anim.duration <= 0f ? 1f : Mathf.Clamp01(anim.elapsed / anim.duration);
+            float easedT = EvaluateEase(anim.ease, t);
+            Vector3 value = Vector3.LerpUnclamped(anim.start, anim.end, easedT);
+            ApplyAnimationValue(target, anim.type, value);
+
+            if (anim.elapsed >= anim.duration)
+            {
+                // Remove completed animation before invoking callbacks so follow-up animations can register cleanly.
+                activeAnimations.RemoveAt(i);
+                anim.onComplete?.Invoke();
+            }
+            else
+            {
+                activeAnimations[i] = anim;
+            }
+        }
+    }
+
+    private static float EvaluateEase(AnimationEase ease, float t)
+    {
+        switch (ease)
+        {
+            case AnimationEase.OutCubic:
+                return 1f - Mathf.Pow(1f - t, 3f);
+            case AnimationEase.OutBounce:
+                const float n1 = 7.5625f;
+                const float d1 = 2.75f;
+                if (t < 1f / d1)
+                {
+                    return n1 * t * t;
+                }
+                if (t < 2f / d1)
+                {
+                    t -= 1.5f / d1;
+                    return n1 * t * t + 0.75f;
+                }
+                if (t < 2.5f / d1)
+                {
+                    t -= 2.25f / d1;
+                    return n1 * t * t + 0.9375f;
+                }
+                t -= 2.625f / d1;
+                return n1 * t * t + 0.984375f;
+            case AnimationEase.OutBack:
+                const float c1 = 1.70158f;
+                const float c3 = c1 + 1f;
+                return 1f + c3 * Mathf.Pow(t - 1f, 3f) + c1 * Mathf.Pow(t - 1f, 2f);
+            case AnimationEase.OutSine:
+                return Mathf.Sin((t * Mathf.PI) / 2f);
+            default:
+                return t;
+        }
+    }
+
+    private Node GetNodeFromIndex(int index)
+    {
+        if (boardModel == null || gridManager == null)
+        {
+            return null;
+        }
+
+        int columns = boardModel.Columns;
+        if (columns <= 0 || index < 0)
+        {
+            return null;
+        }
+
+        int x = boardModel.X(index);
+        int y = boardModel.Y(index);
+        if (x < 0 || y < 0)
+        {
+            return null;
+        }
+
+        Node[,] grid = gridManager.NodeGrid;
+        if (grid == null || x >= grid.GetLength(0) || y >= grid.GetLength(1))
+        {
+            return null;
+        }
+
+        return grid[x, y];
+    }
+
+    private bool ModelHasValidMove()
+    {
+        if (boardModel == null)
+        {
+            return false;
+        }
+
+        int columns = boardModel.Columns;
+        int rows = boardModel.Rows;
+        if (columns <= 0 || rows <= 0)
+        {
+            return false;
+        }
+
+        for (int y = 0; y < rows; y++)
+        {
+            for (int x = 0; x < columns; x++)
+            {
+                int index = boardModel.Index(x, y);
+                if (index < 0)
+                {
+                    continue;
+                }
+
+                Cell cell = boardModel.GetCell(index);
+                if (!cell.occupied)
+                {
+                    continue;
+                }
+
+                byte color = cell.colorId;
+                int rightIndex = boardModel.Index(x + 1, y);
+                if (rightIndex >= 0)
+                {
+                    Cell rightCell = boardModel.GetCell(rightIndex);
+                    if (rightCell.occupied && rightCell.colorId == color)
+                    {
+                        return true;
+                    }
+                }
+
+                int upIndex = boardModel.Index(x, y + 1);
+                if (upIndex >= 0)
+                {
+                    Cell upCell = boardModel.GetCell(upIndex);
+                    if (upCell.occupied && upCell.colorId == color)
+                    {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private int FindNeighbourIndex(int index)
+    {
+        if (boardModel == null)
+        {
+            return -1;
+        }
+
+        int x = boardModel.X(index);
+        int y = boardModel.Y(index);
+        if (x < 0 || y < 0)
+        {
+            return -1;
+        }
+
+        int idx = boardModel.Index(x + 1, y);
+        if (idx >= 0)
+        {
+            return idx;
+        }
+
+        idx = boardModel.Index(x - 1, y);
+        if (idx >= 0)
+        {
+            return idx;
+        }
+
+        idx = boardModel.Index(x, y + 1);
+        if (idx >= 0)
+        {
+            return idx;
+        }
+
+        idx = boardModel.Index(x, y - 1);
+        if (idx >= 0)
+        {
+            return idx;
+        }
+
+        return -1;
+    }
+
+    private enum AnimationType
+    {
+        Position,
+        Scale
+    }
+
+    private enum AnimationEase
+    {
+        Linear,
+        OutCubic,
+        OutBounce,
+        OutBack,
+        OutSine
+    }
+
+    private struct BlockMove
+    {
+        public int fromIndex;
+        public int toIndex;
+        public Block block;
+    }
+
+    private struct BlockAnimation
+    {
+        public Transform target;
+        public Vector3 start;
+        public Vector3 end;
+        public float duration;
+        public float elapsed;
+        public AnimationEase ease;
+        public AnimationType type;
+        public Action onComplete;
+    }
+
+    private bool TryGuaranteeMove(Node[,] nodeGrid, BoardSettings settings)
+    {
+        if (boardModel == null || nodeGrid == null || settings == null)
+        {
+            return false;
+        }
+
+        Array.Fill(colorFirstIndex, -1);
+        Array.Fill(colorSecondIndex, -1);
+
+        int cellCount = boardModel.CellCount;
+        for (int i = 0; i < cellCount; i++)
+        {
+            Cell cell = boardModel.GetCell(i);
+            if (!cell.occupied)
+            {
+                continue;
+            }
+
+            int color = cell.colorId;
+            if (color < 0 || color >= MaxColorIds)
+            {
+                continue;
+            }
+
+            if (colorFirstIndex[color] == -1)
+            {
+                colorFirstIndex[color] = i;
+            }
+            else if (colorSecondIndex[color] == -1)
+            {
+                colorSecondIndex[color] = i;
+            }
+        }
+
+        int chosenColor = -1;
+        for (int c = 0; c < MaxColorIds; c++)
+        {
+            if (colorFirstIndex[c] != -1 && colorSecondIndex[c] != -1)
+            {
+                chosenColor = c;
+                break;
+            }
+        }
+
+        if (chosenColor == -1)
+        {
+            return false;
+        }
+
+        int anchorIndex = colorFirstIndex[chosenColor];
+        int movingIndex = colorSecondIndex[chosenColor];
+        int targetNeighbour = FindNeighbourIndex(anchorIndex);
+
+        if (targetNeighbour < 0)
+        {
+            anchorIndex = movingIndex;
+            movingIndex = colorFirstIndex[chosenColor];
+            targetNeighbour = FindNeighbourIndex(anchorIndex);
+        }
+
+        if (targetNeighbour < 0 || movingIndex == targetNeighbour)
+        {
+            return false;
+        }
+
+        Node movingNode = GetNodeFromIndex(movingIndex);
+        Node targetNode = GetNodeFromIndex(targetNeighbour);
+        if (movingNode == null || targetNode == null)
+        {
+            return false;
+        }
+
+        SwapNodeBlock(movingNode, targetNode);
+        return true;
     }
 }
