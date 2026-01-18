@@ -43,7 +43,7 @@
 - [x] **Prefab Icon Validation**
   - Extend editor-time validation to ensure every `Block` prefab has all four sprite tiers assigned and that sprites are not duplicated across colors, keeping the “unique icons per color/group size” promise.
 
-- [ ] **Flood-Fill Allocation Reduction**
+- [x] **Flood-Fill Allocation Reduction**
   - Rework `Block.FloodFill`/`RefreshGroupVisuals` to reuse buffers or share traversal data so large blasts no longer allocate fresh `HashSet`/`Stack` instances each frame.
 
 - [ ] **Spawn List Reuse**

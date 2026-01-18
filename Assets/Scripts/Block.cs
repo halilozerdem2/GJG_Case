@@ -73,10 +73,25 @@ public class Block : MonoBehaviour
         transform.localPosition = Vector3.zero;
     }
 
-    public HashSet<Block> FloodFill()
+    public HashSet<Block> FloodFill(HashSet<Block> visited, Stack<Block> stack)
     {
-        HashSet<Block> visited = new HashSet<Block>();
-        Stack<Block> stack = new Stack<Block>();
+        if (visited == null)
+        {
+            visited = new HashSet<Block>();
+        }
+        else
+        {
+            visited.Clear();
+        }
+
+        if (stack == null)
+        {
+            stack = new Stack<Block>();
+        }
+        else
+        {
+            stack.Clear();
+        }
 
         stack.Push(this);
         visited.Add(this);
@@ -95,6 +110,11 @@ public class Block : MonoBehaviour
         }
 
         return visited;
+    }
+
+    public HashSet<Block> FloodFill()
+    {
+        return FloodFill(null, null);
     }
 
     public void ApplyGroupIcon(int groupSize, BoardSettings settings)

@@ -25,6 +25,10 @@ public class BlockManager : MonoBehaviour
     private static readonly ProfilerMarker ShuffleMarker = new ProfilerMarker("BlockManager.TryShuffleBoard");
 
     private readonly Dictionary<Block, HashSet<Block>> blockGroups = new Dictionary<Block, HashSet<Block>>();
+    private readonly Stack<Block> floodStack = new Stack<Block>(64);
+    private readonly Stack<HashSet<Block>> groupSetPool = new Stack<HashSet<Block>>();
+    private readonly HashSet<HashSet<Block>> uniqueGroupCollector = new HashSet<HashSet<Block>>();
+    private readonly HashSet<Block> processedBlocks = new HashSet<Block>();
     private bool isValidMoveExist;
     private Transform blastEffectRoot;
     private int shuffleTweensPending;
@@ -38,7 +42,7 @@ public class BlockManager : MonoBehaviour
     public void Initialize(GridManager grid)
     {
         gridManager = grid != null ? grid : gridManager;
-        blockGroups.Clear();
+        ClearCachedGroups();
         isValidMoveExist = false;
         shuffleTweensPending = 0;
         shuffleResolutionPending = false;
@@ -60,9 +64,11 @@ public class BlockManager : MonoBehaviour
             return false;
         }
 
-        if (!blockGroups.TryGetValue(block, out HashSet<Block> group))
+        bool fromCache = blockGroups.TryGetValue(block, out HashSet<Block> group);
+        if (!fromCache)
         {
-            group = block.FloodFill();
+            group = AcquireGroupSet();
+            block.FloodFill(group, floodStack);
         }
 
         if (group.Count >= 2)
@@ -81,11 +87,16 @@ public class BlockManager : MonoBehaviour
                 blockGroups.Remove(b);
             }
 
+            ReleaseGroupSet(group);
             return true;
         }
 
         PlayInvalidGroupFeedback(group);
         audioManager?.PlayInvalidSelection();
+        if (!fromCache)
+        {
+            ReleaseGroupSet(group);
+        }
         return false;
     }
 
@@ -191,7 +202,7 @@ public class BlockManager : MonoBehaviour
             return;
         }
 
-        blockGroups.Clear();
+        ClearCachedGroups();
         List<Block> blocks = new List<Block>(settings.Rows * settings.Columns);
         for (int x = 0; x < settings.Columns; x++)
         {
@@ -275,7 +286,7 @@ public class BlockManager : MonoBehaviour
             return false;
         }
 
-        blockGroups.Clear();
+        ClearCachedGroups();
         isValidMoveExist = false;
         bool anyDestroyed = false;
 
@@ -453,24 +464,25 @@ public class BlockManager : MonoBehaviour
     {
         if (gridManager == null || gridManager.Nodes == null || gridManager.Nodes.Count == 0)
         {
+            ClearCachedGroups();
             isValidMoveExist = false;
             return;
         }
 
-        blockGroups.Clear();
+        ClearCachedGroups();
         isValidMoveExist = false;
-        HashSet<Block> processed = new HashSet<Block>();
+        processedBlocks.Clear();
         foreach (var node in gridManager.Nodes.Values)
         {
             Block block = node.OccupiedBlock;
-            if (block == null || !processed.Add(block)) continue;
-
-            HashSet<Block> group = block.FloodFill();
-            int groupSize = group.Count;
-            foreach (var member in group)
+            if (block == null || !processedBlocks.Add(block))
             {
-                blockGroups[member] = group;
+                continue;
             }
+
+            HashSet<Block> group = AcquireGroupSet();
+            block.FloodFill(group, floodStack);
+            int groupSize = group.Count;
 
             if (groupSize >= 2)
             {
@@ -479,8 +491,9 @@ public class BlockManager : MonoBehaviour
 
             foreach (var member in group)
             {
+                blockGroups[member] = group;
+                processedBlocks.Add(member);
                 member.ApplyGroupIcon(groupSize, Settings);
-                processed.Add(member);
             }
         }
     }
@@ -824,6 +837,48 @@ public class BlockManager : MonoBehaviour
         }
 
         CompleteShuffle();
+    }
+
+    private HashSet<Block> AcquireGroupSet()
+    {
+        return groupSetPool.Count > 0 ? groupSetPool.Pop() : new HashSet<Block>();
+    }
+
+    private void ReleaseGroupSet(HashSet<Block> set)
+    {
+        if (set == null)
+        {
+            return;
+        }
+
+        set.Clear();
+        groupSetPool.Push(set);
+    }
+
+    private void ClearCachedGroups()
+    {
+        if (blockGroups.Count == 0)
+        {
+            return;
+        }
+
+        uniqueGroupCollector.Clear();
+        foreach (var kvp in blockGroups)
+        {
+            if (kvp.Value != null)
+            {
+                uniqueGroupCollector.Add(kvp.Value);
+            }
+        }
+
+        blockGroups.Clear();
+
+        foreach (var group in uniqueGroupCollector)
+        {
+            ReleaseGroupSet(group);
+        }
+
+        uniqueGroupCollector.Clear();
     }
 
     private bool RegenerateBoardWithGuaranteedPairs(Node[,] nodeGrid, BoardSettings settings)

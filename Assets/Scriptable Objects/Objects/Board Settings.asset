@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Board Settings
   m_EditorClassIdentifier: Assembly-CSharp::BoardSettings
   rows: 10
-  columns: 10
+  columns: 8
   colors: 6
   blockPrefabs:
   - {fileID: 7227639219560338211, guid: f6fed28195f7948a58326dbf02721526, type: 3}
