@@ -25,11 +25,13 @@ public class MainMenuCanvasController : MonoBehaviour
 
     public void GoToCaseScene()
     {
+        SetExplicitGameMode(GameManager.GameMode.Case);
         LoadScene(caseSceneIndex);
     }
 
     public void GoToPlayScene()
     {
+        SetExplicitGameMode(GameManager.GameMode.Game);
         LoadScene(playSceneIndex);
     }
 
@@ -55,6 +57,7 @@ public class MainMenuCanvasController : MonoBehaviour
             return;
         }
 
+        ApplyGameModeFromSelection(selection);
         LoadScene(targetScene);
     }
 
@@ -82,5 +85,33 @@ public class MainMenuCanvasController : MonoBehaviour
         target.DOScale(dropdownBaseScale * invalidModePulseScale, invalidModePulseDuration)
             .SetLoops(2, LoopType.Yoyo)
             .SetEase(Ease.OutQuad);
+    }
+
+    private void ApplyGameModeFromSelection(int selection)
+    {
+        if (selection <= 0)
+        {
+            return;
+        }
+
+        var gameManager = GameManager.Instance;
+        if (gameManager == null)
+        {
+            return;
+        }
+
+        var mode = selection == 1 ? GameManager.GameMode.Game : GameManager.GameMode.Case;
+        gameManager.SetGameMode(mode);
+    }
+
+    private void SetExplicitGameMode(GameManager.GameMode mode)
+    {
+        var gameManager = GameManager.Instance;
+        if (gameManager == null)
+        {
+            return;
+        }
+
+        gameManager.SetGameMode(mode);
     }
 }

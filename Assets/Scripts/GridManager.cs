@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -20,19 +21,20 @@ public class GridManager : MonoBehaviour
     };
 
     private readonly Vector3[] playableAreaCorners = new Vector3[4];
-    private readonly Dictionary<Vector2Int, Node> nodes = new Dictionary<Vector2Int, Node>();
     private readonly HashSet<Node> freeNodes = new HashSet<Node>();
+    private Node[] allNodes = Array.Empty<Node>();
     private Node[,] nodeGrid;
     private Transform gridRoot;
     private GameObject boardInstance;
     private Vector3 boardBaseScale = Vector3.one;
     private Vector2 boardEnvelopeSize;
+    private int totalNodeCount;
 
     public BoardSettings BoardSettings => boardSettings;
-    public Dictionary<Vector2Int, Node> Nodes => nodes;
     public Node[,] NodeGrid => nodeGrid;
     public HashSet<Node> FreeNodes => freeNodes;
     public Transform GridRoot => gridRoot;
+    public int TotalNodeCount => totalNodeCount;
 
     public void InitializeGrid()
     {
@@ -41,9 +43,9 @@ public class GridManager : MonoBehaviour
             return;
         }
 
-        nodes.Clear();
         freeNodes.Clear();
         nodeGrid = new Node[boardSettings.Columns, boardSettings.Rows];
+        AllocateNodeStorage();
 
         SetupBoard();
         CreateNodes();
@@ -99,8 +101,12 @@ public class GridManager : MonoBehaviour
 
                 node.gridPosition = new Vector2Int(x, y);
                 node.SetSortingOrder(5 + y);
-                nodes[node.gridPosition] = node;
                 nodeGrid[x, y] = node;
+                int flatIndex = GetFlatIndex(x, y);
+                if (flatIndex >= 0 && flatIndex < allNodes.Length)
+                {
+                    allNodes[flatIndex] = node;
+                }
                 freeNodes.Add(node);
             }
         }
@@ -137,34 +143,96 @@ public class GridManager : MonoBehaviour
     public void UpdateFreeNodes()
     {
         freeNodes.Clear();
-        foreach (var node in nodes.Values)
+        if (allNodes == null)
         {
-            if (node.OccupiedBlock == null)
+            return;
+        }
+
+        for (int i = 0; i < totalNodeCount; i++)
+        {
+            Node node = allNodes[i];
+            if (node != null && node.OccupiedBlock == null)
             {
                 freeNodes.Add(node);
             }
         }
     }
 
-    public IEnumerable<Block> GetMatchingNeighbours(Block block)
+    public int GetMatchingNeighbours(Block block, List<Block> results)
     {
-        if (block == null || block.node == null)
+        if (results == null || block == null || block.node == null)
         {
-            yield break;
+            return 0;
         }
 
         foreach (var dir in CardinalDirections)
         {
             Vector2Int neighbourPosition = block.node.gridPosition + dir;
-            if (nodes.TryGetValue(neighbourPosition, out Node neighbourNode))
+            if (TryGetNode(neighbourPosition, out Node neighbourNode))
             {
                 Block neighbourBlock = neighbourNode.OccupiedBlock;
                 if (neighbourBlock != null && neighbourBlock.blockType == block.blockType)
                 {
-                    yield return neighbourBlock;
+                    results.Add(neighbourBlock);
                 }
             }
         }
+
+        return results.Count;
+    }
+
+    public bool TryGetNode(Vector2Int gridPosition, out Node node)
+    {
+        node = null;
+        if (nodeGrid == null)
+        {
+            return false;
+        }
+
+        if (gridPosition.x < 0 || gridPosition.y < 0)
+        {
+            return false;
+        }
+
+        if (gridPosition.x >= nodeGrid.GetLength(0) || gridPosition.y >= nodeGrid.GetLength(1))
+        {
+            return false;
+        }
+
+        node = nodeGrid[gridPosition.x, gridPosition.y];
+        return node != null;
+    }
+
+    private void AllocateNodeStorage()
+    {
+        int columns = Mathf.Max(0, boardSettings.Columns);
+        int rows = Mathf.Max(0, boardSettings.Rows);
+        totalNodeCount = columns * rows;
+
+        if (totalNodeCount <= 0)
+        {
+            allNodes = Array.Empty<Node>();
+            return;
+        }
+
+        if (allNodes == null || allNodes.Length != totalNodeCount)
+        {
+            allNodes = new Node[totalNodeCount];
+        }
+        else
+        {
+            Array.Clear(allNodes, 0, allNodes.Length);
+        }
+    }
+
+    private int GetFlatIndex(int x, int y)
+    {
+        if (boardSettings == null)
+        {
+            return -1;
+        }
+
+        return y * boardSettings.Columns + x;
     }
 
     public Vector3 GetGridCenter()

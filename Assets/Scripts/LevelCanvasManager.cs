@@ -175,11 +175,13 @@ public class LevelCanvasManager : MonoBehaviour
 
     public void GoToCaseScene()
     {
+        SetGameMode(GameManager.GameMode.Case);
         LoadSceneByIndex(1);
     }
 
     public void GoToPlayScene()
     {
+        SetGameMode(GameManager.GameMode.Game);
         LoadSceneByIndex(2);
     }
 
@@ -212,5 +214,16 @@ public class LevelCanvasManager : MonoBehaviour
 
         Time.timeScale = 1f;
         SceneManager.LoadScene(index);
+    }
+
+    private void SetGameMode(GameManager.GameMode mode)
+    {
+        var manager = GameManager.Instance;
+        if (manager == null)
+        {
+            return;
+        }
+
+        manager.SetGameMode(mode);
     }
 }

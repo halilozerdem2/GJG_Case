@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.SceneManagement;
@@ -11,8 +12,16 @@ public class GameManager : MonoBehaviour
     [SerializeField] private int targetFrameRate = 60;
     [SerializeField] private int vSyncCount = 0;
     [SerializeField] private string mainMenuSceneName = "MainMenu";
+    [SerializeField] private GameMode startupMode = GameMode.Game;
 
     private GameState _state;
+    private GameMode _currentGameMode = GameMode.Game;
+
+    public GameMode CurrentGameMode => _currentGameMode;
+    public bool IsCaseMode => _currentGameMode == GameMode.Case;
+    public bool IsGameMode => _currentGameMode == GameMode.Game;
+
+    public event Action<GameMode> GameModeChanged;
 
     private void Awake()
     {
@@ -24,6 +33,7 @@ public class GameManager : MonoBehaviour
 
         Instance = this;
         DontDestroyOnLoad(gameObject);
+        _currentGameMode = startupMode;
         ApplyPerformanceSettings();
         SceneManager.sceneLoaded += HandleSceneLoaded;
         EnsureMainMenuLoaded();
@@ -76,6 +86,17 @@ public class GameManager : MonoBehaviour
         }
     }
 
+    public void SetGameMode(GameMode mode)
+    {
+        if (_currentGameMode == mode)
+        {
+            return;
+        }
+
+        _currentGameMode = mode;
+        GameModeChanged?.Invoke(_currentGameMode);
+    }
+
     private void HandleBlocksSpawned(bool hasValidMove)
     {
         ChangeState(hasValidMove ? GameState.WaitingInput : GameState.Deadlock);
@@ -109,17 +130,20 @@ public class GameManager : MonoBehaviour
         }
     }
 
-    public IEnumerable<Block> GetMatchingNeighbours(Block block)
+    public int GetMatchingNeighbours(Block block, List<Block> buffer)
     {
-        if (gridManager == null)
+        if (buffer == null)
         {
-            yield break;
+            return 0;
         }
 
-        foreach (var neighbour in gridManager.GetMatchingNeighbours(block))
+        buffer.Clear();
+        if (gridManager == null)
         {
-            yield return neighbour;
+            return 0;
         }
+
+        return gridManager.GetMatchingNeighbours(block, buffer);
     }
 
     public void UpdateGrid()
@@ -167,6 +191,12 @@ public class GameManager : MonoBehaviour
         Win,
         Lose,
         Pause
+    }
+
+    public enum GameMode
+    {
+        Game,
+        Case
     }
 
     private void ApplyPerformanceSettings()

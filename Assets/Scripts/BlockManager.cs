@@ -27,6 +27,10 @@ public class BlockManager : MonoBehaviour
     private readonly List<BlockMove> blockMoves = new List<BlockMove>(64);
     private readonly List<int> pendingSpawnIndices = new List<int>(64);
     private readonly List<BlockAnimation> activeAnimations = new List<BlockAnimation>(128);
+    private readonly List<Node> shuffleNodesBuffer = new List<Node>(64);
+    private readonly List<Node>[] shuffleColorBuckets = new List<Node>[MaxColorIds];
+    private readonly bool[] shuffleColorUsage = new bool[MaxColorIds];
+    private readonly int[] usedColorIds = new int[MaxColorIds];
     private readonly int[] colorFirstIndex = new int[MaxColorIds];
     private readonly int[] colorSecondIndex = new int[MaxColorIds];
     private BoardModel boardModel = new BoardModel();
@@ -40,6 +44,7 @@ public class BlockManager : MonoBehaviour
     private int visitStamp;
     private int groupEvaluationStamp;
     private int dirtyCount;
+    private int usedColorCount;
     private bool requireFullRefresh;
     private bool isValidMoveExist;
     private Transform blastEffectRoot;
@@ -47,6 +52,7 @@ public class BlockManager : MonoBehaviour
     private int shuffleTweensPending;
     private bool shuffleResolutionPending;
     private Action<bool> shuffleCompletionCallback;
+    private bool[] shuffleLockedFlags;
 
     private BoardSettings Settings => boardSettings != null ? boardSettings : gridManager?.BoardSettings;
     private AudioManager Audio => audioManager != null ? audioManager : AudioManager.Instance;
@@ -894,15 +900,24 @@ public class BlockManager : MonoBehaviour
     {
         using (ShuffleMarker.Auto())
         {
-            Dictionary<Vector2Int, Node> nodes = gridManager?.Nodes;
             Node[,] nodeGrid = gridManager?.NodeGrid;
             BoardSettings settings = Settings;
-            if (nodes == null || nodes.Count == 0 || nodeGrid == null || settings == null)
+            if (nodeGrid == null || settings == null || boardModel == null)
             {
                 return false;
             }
 
-            Dictionary<int, List<Node>> colorNodes = new Dictionary<int, List<Node>>();
+            int totalNodes = settings.Columns * settings.Rows;
+            if (totalNodes <= 0)
+            {
+                return false;
+            }
+
+            EnsureShuffleBuffers(totalNodes);
+            ResetShuffleLocks(totalNodes);
+            ResetColorBuckets();
+            shuffleNodesBuffer.Clear();
+
             foreach (Node node in nodeGrid)
             {
                 if (node?.OccupiedBlock == null)
@@ -910,16 +925,11 @@ public class BlockManager : MonoBehaviour
                     continue;
                 }
 
-                int color = node.OccupiedBlock.blockType;
-                if (!colorNodes.TryGetValue(color, out List<Node> list))
-                {
-                    list = new List<Node>();
-                    colorNodes[color] = list;
-                }
-                list.Add(node);
+                int colorId = ToColorId(node.OccupiedBlock.blockType);
+                GetColorBucket(colorId).Add(node);
             }
 
-            int colorWithPair = GetColorWithPair(colorNodes);
+            int colorWithPair = GetColorWithPair();
             if (colorWithPair == -1)
             {
                 bool regenerated = RegenerateBoardWithGuaranteedPairs(nodeGrid, settings);
@@ -930,12 +940,11 @@ public class BlockManager : MonoBehaviour
                 return regenerated;
             }
 
-            HashSet<Node> lockedNodes = new HashSet<Node>();
             Vector2Int firstPairA = new Vector2Int(0, 0);
             Vector2Int firstPairB = settings.Columns > 1 ? new Vector2Int(1, 0) : new Vector2Int(0, 1);
-            CommitPair(colorNodes, colorWithPair, firstPairA, firstPairB, lockedNodes);
+            CommitPair(colorWithPair, firstPairA, firstPairB);
 
-            int secondColor = GetDifferentColorWithPair(colorNodes, colorWithPair);
+            int secondColor = GetDifferentColorWithPair(colorWithPair);
             if (secondColor != -1)
             {
                 Vector2Int secondPairA;
@@ -959,25 +968,24 @@ public class BlockManager : MonoBehaviour
 
                 if (secondColor != -1)
                 {
-                    CommitPair(colorNodes, secondColor, secondPairA, secondPairB, lockedNodes);
+                    CommitPair(secondColor, secondPairA, secondPairB);
                 }
             }
 
-            List<Node> swappableNodes = new List<Node>();
             foreach (Node node in nodeGrid)
             {
-                if (node?.OccupiedBlock == null || lockedNodes.Contains(node))
+                if (node?.OccupiedBlock == null || IsNodeLocked(node))
                 {
                     continue;
                 }
 
-                swappableNodes.Add(node);
+                shuffleNodesBuffer.Add(node);
             }
 
-            for (int i = swappableNodes.Count - 1; i > 0; i--)
+            for (int i = shuffleNodesBuffer.Count - 1; i > 0; i--)
             {
                 int j = Random.Range(0, i + 1);
-                SwapNodeBlock(swappableNodes[i], swappableNodes[j]);
+                SwapNodeBlock(shuffleNodesBuffer[i], shuffleNodesBuffer[j]);
             }
 
             if (!ModelHasValidMove())
@@ -1028,53 +1036,59 @@ public class BlockManager : MonoBehaviour
         }
     }
 
-    private int GetColorWithPair(Dictionary<int, List<Node>> colorNodes)
+    private int GetColorWithPair()
     {
-        foreach (var kvp in colorNodes)
+        for (int i = 0; i < usedColorCount; i++)
         {
-            if (kvp.Value.Count >= 2)
+            int colorId = usedColorIds[i];
+            List<Node> nodes = shuffleColorBuckets[colorId];
+            if (nodes != null && nodes.Count >= 2)
             {
-                return kvp.Key;
+                return colorId;
             }
         }
 
         return -1;
     }
 
-    private int GetDifferentColorWithPair(Dictionary<int, List<Node>> colorNodes, int excludedColor)
+    private int GetDifferentColorWithPair(int excludedColor)
     {
-        foreach (var kvp in colorNodes)
+        for (int i = 0; i < usedColorCount; i++)
         {
-            if (kvp.Key == excludedColor)
+            int colorId = usedColorIds[i];
+            if (colorId == excludedColor)
             {
                 continue;
             }
 
-            if (kvp.Value.Count >= 2)
+            List<Node> nodes = shuffleColorBuckets[colorId];
+            if (nodes != null && nodes.Count >= 2)
             {
-                return kvp.Key;
+                return colorId;
             }
         }
 
         return -1;
     }
 
-    private void CommitPair(Dictionary<int, List<Node>> colorNodes, int color, Vector2Int posA, Vector2Int posB,
-        HashSet<Node> lockedNodes)
+    private void CommitPair(int color, Vector2Int posA, Vector2Int posB)
     {
-        if (!colorNodes.TryGetValue(color, out List<Node> nodesOfColor) || nodesOfColor.Count < 2)
+        if (!gridManager.TryGetNode(posA, out Node nodeA) || !gridManager.TryGetNode(posB, out Node nodeB))
         {
             return;
         }
 
-        if (!gridManager.Nodes.TryGetValue(posA, out Node nodeA) || !gridManager.Nodes.TryGetValue(posB, out Node nodeB))
+        List<Node> nodesOfColor = color >= 0 && color < shuffleColorBuckets.Length
+            ? shuffleColorBuckets[color]
+            : null;
+        if (nodesOfColor == null || nodesOfColor.Count < 2)
         {
             return;
         }
 
         EnsureColorAtPositions(nodesOfColor, nodeA, nodeB);
-        lockedNodes?.Add(nodeA);
-        lockedNodes?.Add(nodeB);
+        LockNode(nodeA);
+        LockNode(nodeB);
     }
 
     private void EnsureColorAtPositions(List<Node> colorNodes, Node targetA, Node targetB)
@@ -1089,6 +1103,90 @@ public class BlockManager : MonoBehaviour
 
         colorNodes[0] = targetA;
         colorNodes[1] = targetB;
+    }
+
+    private void EnsureShuffleBuffers(int totalNodes)
+    {
+        if (shuffleLockedFlags == null || shuffleLockedFlags.Length < totalNodes)
+        {
+            shuffleLockedFlags = new bool[totalNodes];
+        }
+
+        if (shuffleNodesBuffer.Capacity < totalNodes)
+        {
+            shuffleNodesBuffer.Capacity = totalNodes;
+        }
+    }
+
+    private void ResetShuffleLocks(int totalNodes)
+    {
+        if (shuffleLockedFlags == null)
+        {
+            return;
+        }
+
+        int length = Mathf.Min(totalNodes, shuffleLockedFlags.Length);
+        Array.Clear(shuffleLockedFlags, 0, length);
+    }
+
+    private void ResetColorBuckets()
+    {
+        for (int i = 0; i < usedColorCount; i++)
+        {
+            int colorId = usedColorIds[i];
+            shuffleColorBuckets[colorId]?.Clear();
+            shuffleColorUsage[colorId] = false;
+        }
+
+        usedColorCount = 0;
+    }
+
+    private List<Node> GetColorBucket(int colorId)
+    {
+        colorId = Mathf.Clamp(colorId, 0, shuffleColorBuckets.Length - 1);
+        List<Node> bucket = shuffleColorBuckets[colorId];
+        if (bucket == null)
+        {
+            bucket = new List<Node>(8);
+            shuffleColorBuckets[colorId] = bucket;
+        }
+
+        if (!shuffleColorUsage[colorId])
+        {
+            bucket.Clear();
+            shuffleColorUsage[colorId] = true;
+            if (usedColorCount < usedColorIds.Length)
+            {
+                usedColorIds[usedColorCount++] = colorId;
+            }
+        }
+
+        return bucket;
+    }
+
+    private void LockNode(Node node)
+    {
+        if (node == null || boardModel == null || shuffleLockedFlags == null)
+        {
+            return;
+        }
+
+        int index = boardModel.Index(node.gridPosition.x, node.gridPosition.y);
+        if (index >= 0 && index < shuffleLockedFlags.Length)
+        {
+            shuffleLockedFlags[index] = true;
+        }
+    }
+
+    private bool IsNodeLocked(Node node)
+    {
+        if (node == null || boardModel == null || shuffleLockedFlags == null)
+        {
+            return false;
+        }
+
+        int index = boardModel.Index(node.gridPosition.x, node.gridPosition.y);
+        return index >= 0 && index < shuffleLockedFlags.Length && shuffleLockedFlags[index];
     }
 
     private void SwapNodeBlock(Node source, Node destination)

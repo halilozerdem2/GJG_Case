@@ -5,6 +5,7 @@ public class Block : MonoBehaviour
 {
     public Node node;
     public int blockType;
+    private static readonly List<Block> floodFillNeighbours = new List<Block>(4);
 
     [Header("Visuals")]
     [SerializeField] private SpriteRenderer spriteRenderer;
@@ -105,12 +106,22 @@ public class Block : MonoBehaviour
         stack.Push(this);
         visited.Add(this);
 
+        GameManager manager = GameManager.Instance;
+        if (manager == null)
+        {
+            return visited;
+        }
+
+        List<Block> neighbours = floodFillNeighbours;
+
         while (stack.Count > 0)
         {
             Block current = stack.Pop();
 
-            foreach (Block neighbour in GameManager.Instance.GetMatchingNeighbours(current))
+            manager.GetMatchingNeighbours(current, neighbours);
+            for (int i = 0; i < neighbours.Count; i++)
             {
+                Block neighbour = neighbours[i];
                 if (visited.Add(neighbour))
                 {
                     stack.Push(neighbour);
