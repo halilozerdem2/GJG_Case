@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -7,8 +8,8 @@ public class ObjectPool : MonoBehaviour
 
     [SerializeField] private Transform inactiveParent;
 
-    private readonly Dictionary<int, Queue<Block>> pools = new Dictionary<int, Queue<Block>>();
-    private readonly Dictionary<int, Block> prefabLookup = new Dictionary<int, Block>();
+    private readonly Dictionary<BlockPrefabKey, Queue<Block>> pools = new Dictionary<BlockPrefabKey, Queue<Block>>();
+    private readonly Dictionary<BlockPrefabKey, Block> prefabLookup = new Dictionary<BlockPrefabKey, Block>();
     private readonly Dictionary<int, Queue<ParticleSystem>> effectPools = new Dictionary<int, Queue<ParticleSystem>>();
     private readonly Dictionary<int, ParticleSystem> effectPrefabLookup = new Dictionary<int, ParticleSystem>();
     private readonly Dictionary<ParticleSystem, int> effectInstanceLookup = new Dictionary<ParticleSystem, int>();
@@ -48,13 +49,13 @@ public class ObjectPool : MonoBehaviour
                 continue;
             }
 
-            int blockType = prefab.blockType;
-            if (prefabLookup.ContainsKey(blockType))
+            BlockPrefabKey key = new BlockPrefabKey(prefab.blockType, prefab.Archetype);
+            if (prefabLookup.ContainsKey(key))
             {
                 continue;
             }
 
-            prefabLookup[blockType] = prefab;
+            prefabLookup[key] = prefab;
             uniquePrefabs.Add(prefab);
         }
 
@@ -69,6 +70,7 @@ public class ObjectPool : MonoBehaviour
 
         foreach (var prefab in uniquePrefabs)
         {
+            BlockPrefabKey key = new BlockPrefabKey(prefab.blockType, prefab.Archetype);
             Queue<Block> queue = new Queue<Block>(perType);
             for (int i = 0; i < perType; i++)
             {
@@ -76,7 +78,7 @@ public class ObjectPool : MonoBehaviour
                 instance.gameObject.SetActive(false);
                 queue.Enqueue(instance);
             }
-            pools[prefab.blockType] = queue;
+            pools[key] = queue;
         }
     }
 
@@ -120,18 +122,19 @@ public class ObjectPool : MonoBehaviour
         }
     }
 
-    public Block Spawn(int blockType, Transform parent)
+    public Block Spawn(int blockType, Block.BlockArchetype archetype, Transform parent)
     {
-        if (!prefabLookup.ContainsKey(blockType))
+        BlockPrefabKey key = new BlockPrefabKey(blockType, archetype);
+        if (!prefabLookup.ContainsKey(key))
         {
-            Debug.LogWarning($"No prefab registered for block type {blockType}");
+            Debug.LogWarning($"No prefab registered for block type {blockType} and archetype {archetype}.");
             return null;
         }
 
-        if (!pools.TryGetValue(blockType, out Queue<Block> queue))
+        if (!pools.TryGetValue(key, out Queue<Block> queue))
         {
             queue = new Queue<Block>();
-            pools[blockType] = queue;
+            pools[key] = queue;
         }
 
         Block block;
@@ -141,7 +144,7 @@ public class ObjectPool : MonoBehaviour
         }
         else
         {
-            block = Instantiate(prefabLookup[blockType], inactiveParent);
+            block = Instantiate(prefabLookup[key], inactiveParent);
         }
 
         block.gameObject.SetActive(true);
@@ -157,15 +160,15 @@ public class ObjectPool : MonoBehaviour
             return;
         }
 
-        int blockType = block.blockType;
+        BlockPrefabKey key = new BlockPrefabKey(block.blockType, block.Archetype);
         block.ResetBlockState();
         block.gameObject.SetActive(false);
         block.transform.SetParent(inactiveParent, false);
 
-        if (!pools.TryGetValue(blockType, out Queue<Block> queue))
+        if (!pools.TryGetValue(key, out Queue<Block> queue))
         {
             queue = new Queue<Block>();
-            pools[blockType] = queue;
+            pools[key] = queue;
         }
 
         queue.Enqueue(block);
@@ -234,5 +237,35 @@ public class ObjectPool : MonoBehaviour
         instance.gameObject.SetActive(false);
         effectInstanceLookup[instance] = blockType;
         return instance;
+    }
+
+    private readonly struct BlockPrefabKey : IEquatable<BlockPrefabKey>
+    {
+        public readonly int BlockType;
+        public readonly Block.BlockArchetype Archetype;
+
+        public BlockPrefabKey(int blockType, Block.BlockArchetype archetype)
+        {
+            BlockType = blockType;
+            Archetype = archetype;
+        }
+
+        public bool Equals(BlockPrefabKey other)
+        {
+            return BlockType == other.BlockType && Archetype == other.Archetype;
+        }
+
+        public override bool Equals(object obj)
+        {
+            return obj is BlockPrefabKey other && Equals(other);
+        }
+
+        public override int GetHashCode()
+        {
+            unchecked
+            {
+                return (BlockType * 397) ^ (int)Archetype;
+            }
+        }
     }
 }

@@ -101,38 +101,39 @@
 ## Phase 3 — Game Mode Feature Set & Special Blocks
 
 ### High-Level Goals
-- Game mode becomes objective-driven (target block(s), move/time limits, power-up caps) while Case mode remains sandbox/performance test.
-- Blast resolution in Game mode can spawn deterministic special blocks (row/column clears, 2x2 bombs, color clears) based on post-blast group sizes and configured thresholds.
-- Block system moves to an inheritance-friendly structure so RegularBlock and SpecialBlock behaviours stay isolated yet share pooling, visuals, and flood-fill utilities.
+- [ ] Game mode becomes objective-driven (static collectible blocks, move/time limits, power-up cooldowns) while Case mode remains sandbox/performance test.
+- [ ] Blast resolution in Game mode can spawn deterministic special blocks (row/column clears, 2x2 bombs, color clears) based on post-blast group sizes and configured thresholds.
+- [ ] Block system moves to an inheritance-friendly structure so RegularBlock and SpecialBlock behaviours stay isolated yet share pooling, visuals, and flood-fill utilities.
 
-### Step 1 — Data & Configuration Layer
-- Create `GameModeConfig` ScriptableObject holding knobs per mode: move/time limits, power-up caps, group thresholds for special block creation, target block definitions (color/type counts), and spawn distributions for static targets.
-- Extend `GameManager` to load the active config on scene load based on `CurrentGameMode`; expose read-only accessors for limits/targets so UI, BlockManager, and BoardModel can query them.
-- Add serialization for new block archetypes (RowClear, ColumnClear, Bomb2x2, ColorClear) in Block prefab data so ObjectPool knows how to build each variant.
+### Phase 3 Sequential Checklist
+1. **Step 1 — Data & Configuration Layer**
+   - [x] Create `GameModeConfig` ScriptableObject holding knobs per mode: move/time limits, power-up cooldowns, BoardSettings-linked thresholds for special block creation, and spawn distributions/settings for static collectibles.
+   - [x] Extend `GameManager` to load the active config on scene load based on `CurrentGameMode`; expose read-only accessors for limits/targets so UI, BlockManager, and BoardModel can query them.
+   - [x] Add serialization for new block archetypes (RowClear, ColumnClear, Bomb2x2, ColorClear) in Block prefab data so ObjectPool knows how to build each variant.
 
-### Step 2 — Block Hierarchy Refactor
-- Convert `Block` into an abstract base with core state (node ref, color, icon tier, animations, pooling hooks) and virtual methods `CanBlastWith(Block other)`, `HandleBlastResult(GroupContext context)`, `ActivateSpecialEffect(GroupContext context)`.
-- Introduce `RegularBlock : Block` (current behaviour) and `SpecialBlock : Block` base for derived classes; special variants override activation/targeting logic (e.g., row clear collects indices in row, color clear requests BlockManager to mark color type dirty).
-- Update `ObjectPool` and `BlockManager` to spawn the concrete subclass needed; pooling must track block type so reused objects retain correct scripts instead of swapping components at runtime.
-- Update `FloodFill`/`BoardModel` routines to query `block.CanParticipateInGroup()` so special blocks can opt out (e.g., row clears might not join regular groups) or change adjacency rules.
+2. **Step 2 — Block Hierarchy Refactor**
+   - [x] Convert `Block` into an abstract base with core state (node ref, color, icon tier, animations, pooling hooks) and virtual methods `CanBlastWith(Block other)`, `HandleBlastResult(GroupContext context)`, `ActivateSpecialEffect(GroupContext context)`.
+   - [x] Introduce `RegularBlock : Block` (current behaviour) and `SpecialBlock : Block` base for derived classes; special variants override activation/targeting logic (e.g., row clear collects indices in row, color clear requests BlockManager to mark color type dirty).
+   - [x] Update `ObjectPool` and `BlockManager` to spawn the concrete subclass needed; pooling must track block type so reused objects retain correct scripts instead of swapping components at runtime.
+   - [x] Update `FloodFill`/`BoardModel` routines to query `block.CanParticipateInGroup()` so special blocks can opt out (e.g., row clears might not join regular groups) or change adjacency rules.
 
-### Step 3 — Blast Pipeline Enhancements
-- After resolving a regular group blast in Game mode, evaluate `GroupResult` (size, colors involved, adjacency metadata) to determine if a special block should spawn at the group origin. Use config thresholds to map group size ranges -> special block type.
-- Inject new block via pool, setting metadata (e.g., color for ColorClear) and ensuring the board state stays consistent (node occupancy, sprite/icon updates, pooling resets).
-- For Case mode, skip special block insertion entirely to preserve deterministic behaviour.
+3. **Step 3 — Blast Pipeline Enhancements**
+   - [x] After resolving a regular group blast in Game mode, evaluate `GroupResult` (size, colors involved, adjacency metadata) to determine if a special block should spawn at the group origin. Use the BoardSettings thresholds referenced by config entries (A/B/C) to map group size ranges -> special block type.
+   - [x] Inject new block via pool, setting metadata (e.g., color for ColorClear) and ensuring the board state stays consistent (node occupancy, sprite/icon updates, pooling resets).
+   - [x] For Case mode, skip special block insertion entirely to preserve deterministic behaviour.
 
-### Step 4 — Special Block Activation Flow
-- Extend input handling so selecting an already-special block when `IsWaitingForInput` immediately executes its override effect instead of standard neighbour flood fill.
-- Ensure effects integrate with `BoardModel`: gather affected indices (row/column/2x2/all color) and feed them into existing blast+gravity pipelines, ideally via shared `ApplyBlast(IEnumerable<int> indices)` helper.
-- Add VFX/SFX hooks per special block type and route them through AudioManager to respect settings.
+4. **Step 4 — Special Block Activation Flow**
+   - [x] Extend input handling so selecting an already-special block when `IsWaitingForInput` immediately executes its override effect instead of standard neighbour flood fill.
+   - [ ] Ensure effects integrate with `BoardModel`: gather affected indices (row/column/2x2/all color) and feed them into existing blast+gravity pipelines, ideally via shared `ApplyBlast(IEnumerable<int> indices)` helper.
+   - [ ] Add VFX/SFX hooks per special block type and route them through AudioManager to respect settings.
 
-### Step 5 — Objectives, Limits, and UI
-- Add `ObjectiveController` that tracks target block counts, remaining moves, and remaining time using data from `GameModeConfig`; display via HUD (new TMP labels + bars).
-- Integrate move/time decrement into GameManager transitions (`TryBlastBlock` consumes a move; a timer coroutine ticks remaining time). When limits reach zero without objectives met, trigger Lose state; when objectives complete early, trigger Win.
-- For power-up buttons (`LevelCanvasManager`), consult config caps before allowing use; decrement counters per activation and update HUD, greying out buttons when exhausted.
-- Implement static target blocks: when board spawns, inject configured target block prefabs/markers that do not fall or change color. Track them in ObjectiveController and ensure blasts can remove them when requirements are met.
+5. **Step 5 — Objectives, Limits, and UI**
+- [ ] Add `ObjectiveController` that tracks static collectible counts, remaining moves, and remaining time using data from `GameModeConfig`; display via HUD (new TMP labels + bars).
+   - [ ] Integrate move/time decrement into GameManager transitions (`TryBlastBlock` consumes a move; a timer coroutine ticks remaining time). When limits reach zero without objectives met, trigger Lose state; when objectives complete early, trigger Win.
+- [ ] For power-up buttons (`LevelCanvasManager`), consult config cooldowns before allowing use; block re-use until the cool down expires and update HUD to reflect timers/locks.
+- [ ] Implement static target blocks: when board spawns, inject configured target block prefabs/markers that do not fall or change color. Track spawn counts directly (required count == spawn count) and ensure surrounding blasts collect them (adjacent group clears trigger their removal) so requirements reflect static collectibles.
 
-### Step 6 — Validation & Tooling
-- Provide Editor validation that Game mode configs reference available prefabs, have coherent thresholds (e.g., row clear threshold > base blast min), and caps are non-negative.
-- Add Play Mode tests (or lightweight integration scripts) to simulate: (1) large blast creating a row-clear block, (2) activating each special block type, (3) meeting target objectives under move/time pressure.
-- Document designer workflow in README or Confluence-style doc: how to author new GameMode configs, assign target blocks, and tune special-block thresholds.
+6. **Step 6 — Validation & Tooling**
+- [ ] Provide Editor validation that Game mode configs reference available prefabs, have coherent thresholds (e.g., row clear threshold > base blast min), and cooldowns are non-negative.
+   - [ ] Add Play Mode tests (or lightweight integration scripts) to simulate: (1) large blast creating a row-clear block, (2) activating each special block type, (3) meeting target objectives under move/time pressure.
+- [ ] Document designer workflow in README or Confluence-style doc: how to author new GameMode configs, assign static collectible prefabs, and tune special-block thresholds.

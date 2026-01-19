@@ -13,13 +13,24 @@ public class GameManager : MonoBehaviour
     [SerializeField] private int vSyncCount = 0;
     [SerializeField] private string mainMenuSceneName = "MainMenu";
     [SerializeField] private GameMode startupMode = GameMode.Game;
+    [SerializeField] private List<GameModeConfigBinding> gameModeConfigs = new List<GameModeConfigBinding>();
 
     private GameState _state;
     private GameMode _currentGameMode = GameMode.Game;
+    private readonly Dictionary<GameMode, GameModeConfig> _configLookup = new Dictionary<GameMode, GameModeConfig>();
+    private GameModeConfig _activeGameModeConfig;
+    private static readonly GameModeConfig.PowerupCooldownEntry[] EmptyPowerupCooldowns = Array.Empty<GameModeConfig.PowerupCooldownEntry>();
+    private static readonly GameModeConfig.SpecialBlockThreshold[] EmptySpecialThresholds = Array.Empty<GameModeConfig.SpecialBlockThreshold>();
+    private static readonly GameModeConfig.StaticTargetSpawn[] EmptyStaticTargets = Array.Empty<GameModeConfig.StaticTargetSpawn>();
 
     public GameMode CurrentGameMode => _currentGameMode;
     public bool IsCaseMode => _currentGameMode == GameMode.Case;
     public bool IsGameMode => _currentGameMode == GameMode.Game;
+    public GameModeConfig ActiveGameModeConfig => _activeGameModeConfig;
+    public GameModeConfig.MoveTimeLimitSettings ActiveLimitSettings => _activeGameModeConfig != null ? _activeGameModeConfig.Limits : GameModeConfig.MoveTimeLimitSettings.Default;
+    public IReadOnlyList<GameModeConfig.PowerupCooldownEntry> ActivePowerupCooldowns => _activeGameModeConfig != null ? _activeGameModeConfig.PowerupCooldowns : EmptyPowerupCooldowns;
+    public IReadOnlyList<GameModeConfig.SpecialBlockThreshold> ActiveSpecialBlockThresholds => _activeGameModeConfig != null ? _activeGameModeConfig.SpecialBlockThresholds : EmptySpecialThresholds;
+    public IReadOnlyList<GameModeConfig.StaticTargetSpawn> ActiveStaticTargetSpawns => _activeGameModeConfig != null ? _activeGameModeConfig.StaticTargetSpawns : EmptyStaticTargets;
 
     public event Action<GameMode> GameModeChanged;
 
@@ -34,6 +45,8 @@ public class GameManager : MonoBehaviour
         Instance = this;
         DontDestroyOnLoad(gameObject);
         _currentGameMode = startupMode;
+        BuildGameModeConfigLookup();
+        ResolveActiveGameModeConfig(_currentGameMode);
         ApplyPerformanceSettings();
         SceneManager.sceneLoaded += HandleSceneLoaded;
         EnsureMainMenuLoaded();
@@ -94,6 +107,7 @@ public class GameManager : MonoBehaviour
         }
 
         _currentGameMode = mode;
+        ResolveActiveGameModeConfig(_currentGameMode);
         GameModeChanged?.Invoke(_currentGameMode);
     }
 
@@ -211,6 +225,11 @@ public class GameManager : MonoBehaviour
 
     private void HandleSceneLoaded(Scene scene, LoadSceneMode mode)
     {
+        if (_activeGameModeConfig == null)
+        {
+            ResolveActiveGameModeConfig(_currentGameMode);
+        }
+
         SetupScene(scene);
     }
 
@@ -253,5 +272,56 @@ public class GameManager : MonoBehaviour
         {
             SceneManager.LoadScene(0);
         }
+    }
+
+    private void BuildGameModeConfigLookup()
+    {
+        _configLookup.Clear();
+        if (gameModeConfigs == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < gameModeConfigs.Count; i++)
+        {
+            GameModeConfigBinding entry = gameModeConfigs[i];
+            if (entry.config == null)
+            {
+                continue;
+            }
+
+            if (_configLookup.ContainsKey(entry.mode))
+            {
+                Debug.LogWarning($"Duplicate GameModeConfig assignment detected for mode {entry.mode}. Using the first entry only.");
+                continue;
+            }
+
+            _configLookup[entry.mode] = entry.config;
+        }
+    }
+
+    private void ResolveActiveGameModeConfig(GameMode mode)
+    {
+        if (_configLookup.Count == 0)
+        {
+            BuildGameModeConfigLookup();
+        }
+
+        if (_configLookup.TryGetValue(mode, out GameModeConfig config))
+        {
+            _activeGameModeConfig = config;
+        }
+        else
+        {
+            _activeGameModeConfig = null;
+            Debug.LogWarning($"GameManager does not have a GameModeConfig assigned for mode {mode}.");
+        }
+    }
+
+    [Serializable]
+    private struct GameModeConfigBinding
+    {
+        public GameMode mode;
+        public GameModeConfig config;
     }
 }

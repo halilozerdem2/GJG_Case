@@ -165,16 +165,24 @@ public class GridManager : MonoBehaviour
             return 0;
         }
 
+        results.Clear();
+        if (!block.CanParticipateInGroup)
+        {
+            return 0;
+        }
+
         foreach (var dir in CardinalDirections)
         {
             Vector2Int neighbourPosition = block.node.gridPosition + dir;
-            if (TryGetNode(neighbourPosition, out Node neighbourNode))
+            if (!TryGetNode(neighbourPosition, out Node neighbourNode))
             {
-                Block neighbourBlock = neighbourNode.OccupiedBlock;
-                if (neighbourBlock != null && neighbourBlock.blockType == block.blockType)
-                {
-                    results.Add(neighbourBlock);
-                }
+                continue;
+            }
+
+            Block neighbourBlock = neighbourNode.OccupiedBlock;
+            if (neighbourBlock != null && block.CanBlastWith(neighbourBlock))
+            {
+                results.Add(neighbourBlock);
             }
         }
 

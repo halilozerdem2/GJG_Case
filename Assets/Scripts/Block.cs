@@ -1,33 +1,48 @@
 using System.Collections.Generic;
 using UnityEngine;
 
-public class Block : MonoBehaviour
+public abstract class Block : MonoBehaviour
 {
+    public enum BlockArchetype
+    {
+        Regular = 0,
+        RowClear = 1,
+        ColumnClear = 2,
+        Bomb2x2 = 3,
+        ColorClear = 4,
+        Static = 5
+    }
+
     public Node node;
     public int blockType;
+
+    [SerializeField] private BlockArchetype archetype = BlockArchetype.Regular;
+
     private static readonly List<Block> floodFillNeighbours = new List<Block>(4);
 
     [Header("Visuals")]
     [SerializeField] private SpriteRenderer spriteRenderer;
     [SerializeField] private Sprite defaultIcon;
-    [SerializeField] private Sprite tierOneIcon;
-    [SerializeField] private Sprite tierTwoIcon;
-    [SerializeField] private Sprite tierThreeIcon;
     [SerializeField] private Vector3 baseLocalScale = Vector3.one;
 
     public Sprite DefaultIcon => defaultIcon;
-    public Sprite TierOneIcon => tierOneIcon;
-    public Sprite TierTwoIcon => tierTwoIcon;
-    public Sprite TierThreeIcon => tierThreeIcon;
     public Vector3 BaseLocalScale => baseLocalScale;
+    public BlockArchetype Archetype => archetype;
+    public bool IsSpecialVariant => archetype != BlockArchetype.Regular;
+    public virtual Sprite TierOneIcon => null;
+    public virtual Sprite TierTwoIcon => null;
+    public virtual Sprite TierThreeIcon => null;
+    protected SpriteRenderer SpriteRenderer => spriteRenderer;
 
-    private void Awake()
+    public abstract bool CanParticipateInGroup { get; }
+
+    protected virtual void Awake()
     {
         CacheRendererAndScale();
     }
 
 #if UNITY_EDITOR
-    private void OnValidate()
+    protected virtual void OnValidate()
     {
         CacheRendererAndScale();
         if (spriteRenderer != null && defaultIcon == null)
@@ -41,6 +56,31 @@ public class Block : MonoBehaviour
         }
     }
 #endif
+
+    public virtual bool CanBlastWith(Block other)
+    {
+        if (other == null || !CanParticipateInGroup || !other.CanParticipateInGroup)
+        {
+            return false;
+        }
+
+        return SharesBlockType(other);
+    }
+
+    public virtual void HandleBlastResult(GroupContext context)
+    {
+    }
+
+    public virtual void ActivateSpecialEffect(GroupContext context)
+    {
+    }
+
+    public abstract int GatherSearchResults(BlockSearchData searchData);
+
+    protected bool SharesBlockType(Block other)
+    {
+        return other != null && other.blockType == blockType;
+    }
 
     public void SetBlock(Node aNode, bool preserveWorldPosition = false)
     {
@@ -81,6 +121,8 @@ public class Block : MonoBehaviour
         transform.localScale = baseLocalScale;
         transform.localRotation = Quaternion.identity;
         transform.localPosition = Vector3.zero;
+
+        OnStateReset();
     }
 
     public HashSet<Block> FloodFill(HashSet<Block> visited, Stack<Block> stack)
@@ -137,29 +179,28 @@ public class Block : MonoBehaviour
         return FloodFill(null, null);
     }
 
-    public void ApplyGroupIcon(int groupSize, BoardSettings settings)
+    public virtual void ApplyGroupIcon(int groupSize, BoardSettings settings)
     {
-        if (spriteRenderer == null || settings == null)
+        if (spriteRenderer == null || settings == null || !CanParticipateInGroup)
         {
             return;
         }
-
-        Sprite spriteToUse = defaultIcon != null ? defaultIcon : spriteRenderer.sprite;
-
-        if (groupSize > settings.ThresholdC && tierThreeIcon != null)
+        if (defaultIcon != null)
         {
-            spriteToUse = tierThreeIcon;
+            spriteRenderer.sprite = defaultIcon;
         }
-        else if (groupSize > settings.ThresholdB && tierTwoIcon != null)
-        {
-            spriteToUse = tierTwoIcon;
-        }
-        else if (groupSize > settings.ThresholdA && tierOneIcon != null)
-        {
-            spriteToUse = tierOneIcon;
-        }
+    }
 
-        spriteRenderer.sprite = spriteToUse;
+    protected void SetSprite(Sprite sprite)
+    {
+        if (spriteRenderer != null && sprite != null)
+        {
+            spriteRenderer.sprite = sprite;
+        }
+    }
+
+    protected virtual void OnStateReset()
+    {
     }
 
     private void OnMouseDown()
@@ -169,7 +210,12 @@ public class Block : MonoBehaviour
             return;
         }
 
-        GameManager.Instance.TryBlastBlock(this);
+        HandleSelection();
+    }
+
+    protected virtual void HandleSelection()
+    {
+        GameManager.Instance?.TryBlastBlock(this);
     }
 
     private void CacheRendererAndScale()
@@ -185,7 +231,7 @@ public class Block : MonoBehaviour
         }
     }
 
-    private void ApplyNodeSortingOrder()
+    protected virtual void ApplyNodeSortingOrder()
     {
         if (node == null)
         {

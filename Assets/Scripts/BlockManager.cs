@@ -32,12 +32,17 @@ public class BlockManager : MonoBehaviour
     private readonly List<BlockMove> blockMoves = new List<BlockMove>(64);
     private readonly List<int> pendingSpawnIndices = new List<int>(64);
     private readonly List<BlockAnimation> activeAnimations = new List<BlockAnimation>(128);
+    private readonly List<Block> poolPrefabsBuffer = new List<Block>(32);
     private readonly List<Node> shuffleNodesBuffer = new List<Node>(64);
     private readonly List<Node>[] shuffleColorBuckets = new List<Node>[MaxColorIds];
     private readonly bool[] shuffleColorUsage = new bool[MaxColorIds];
     private readonly int[] usedColorIds = new int[MaxColorIds];
     private readonly int[] colorFirstIndex = new int[MaxColorIds];
     private readonly int[] colorSecondIndex = new int[MaxColorIds];
+    private readonly Queue<ChainClearGroup> pendingChainGroups = new Queue<ChainClearGroup>(8);
+    private readonly HashSet<int> processedClearIndices = new HashSet<int>();
+    private readonly Stack<int[]> chainBufferPool = new Stack<int[]>();
+    private readonly List<SpecialClearEntry> pendingSpecialClears = new List<SpecialClearEntry>(8);
     private BoardModel boardModel = new BoardModel();
     private int[] bfsQueue;
     private int[] groupIndicesBuffer;
@@ -117,13 +122,35 @@ public class BlockManager : MonoBehaviour
             return false;
         }
 
+        if (block.IsSpecialVariant)
+        {
+            bool activated = TryExecuteSpecialBlock(block);
+            if (activated)
+            {
+                Audio?.PlayBlockSfx(block.blockType);
+                return true;
+            }
+
+            PlayInvalidGroupFeedback(1);
+            Audio?.PlayInvalidSelection();
+            return false;
+        }
+
+        if (!block.CanParticipateInGroup)
+        {
+            PlayInvalidGroupFeedback(1);
+            Audio?.PlayInvalidSelection();
+            return false;
+        }
+
         Node[,] nodeGrid = gridManager.NodeGrid;
-        if (nodeGrid == null || block.node == null)
+        Node originNode = block.node;
+        if (nodeGrid == null || originNode == null)
         {
             return false;
         }
 
-        Vector2Int position = block.node.gridPosition;
+        Vector2Int position = originNode.gridPosition;
         int startIndex = boardModel.Index(position.x, position.y);
         if (startIndex < 0 || !boardModel.IsOccupied(startIndex))
         {
@@ -139,41 +166,368 @@ public class BlockManager : MonoBehaviour
             return false;
         }
 
+        GroupContext groupContext = new GroupContext(block, groupIndicesBuffer, groupCount, block.blockType);
         Audio?.PlayBlockSfx(block.blockType);
+
+        block.HandleBlastResult(groupContext);
+        ClearBlocksForContext(groupContext, nodeGrid);
+
+        TrySpawnSpecialBlock(groupContext, originNode);
+
+        return true;
+    }
+
+    private bool TryExecuteSpecialBlock(Block block)
+    {
+        if (!TryBuildSearchData(block, out BlockSearchData searchData))
+        {
+            return false;
+        }
+
+        int count = block.GatherSearchResults(searchData);
+        if (count <= 0)
+        {
+            return false;
+        }
+
+        GroupContext context = new GroupContext(block, groupIndicesBuffer, count, block.blockType);
+        block.ActivateSpecialEffect(context);
+        block.HandleBlastResult(context);
+        Node[,] nodeGrid = gridManager?.NodeGrid;
+        return ClearBlocksForContext(context, nodeGrid);
+    }
+
+    private bool ClearBlocksForContext(GroupContext context, Node[,] nodeGrid)
+    {
+        if (boardModel == null || nodeGrid == null || context.Indices == null)
+        {
+            return false;
+        }
 
         int columns = boardModel.Columns;
         int rows = boardModel.Rows;
-        for (int i = 0; i < groupCount; i++)
+        if (columns <= 0 || rows <= 0)
         {
-            int memberIndex = groupIndicesBuffer[i];
-            int x = columns > 0 ? memberIndex % columns : boardModel.X(memberIndex);
-            int y = columns > 0 ? memberIndex / columns : boardModel.Y(memberIndex);
-            if (x < 0 || x >= columns || y < 0 || y >= rows)
-            {
-                ClearModelCell(memberIndex);
-                continue;
-            }
-
-            Node targetNode = nodeGrid[x, y];
-            if (targetNode == null)
-            {
-                ClearModelCell(memberIndex);
-                continue;
-            }
-
-            Block member = targetNode.OccupiedBlock;
-            if (member != null)
-            {
-                targetNode.OccupiedBlock = null;
-                gridManager.FreeNodes.Add(targetNode);
-                PlayBlockBlastEffect(member);
-                ReleaseBlock(member);
-            }
-
-            ClearModelCell(memberIndex);
+            return false;
         }
 
+        bool clearedAny = false;
+        processedClearIndices.Clear();
+        pendingChainGroups.Clear();
+
+        int limit = Mathf.Min(context.GroupSize, context.Indices.Length);
+        EnqueueChainGroup(context.Indices, limit);
+
+        while (pendingChainGroups.Count > 0)
+        {
+            ChainClearGroup group = pendingChainGroups.Dequeue();
+            int[] indices = group.Indices;
+            int groupCount = group.Count;
+            pendingSpecialClears.Clear();
+            if (indices == null || groupCount <= 0)
+            {
+                ReleaseChainBuffer(indices);
+                continue;
+            }
+
+            // Phase 1: determine subsequent group areas before clearing current one.
+            for (int i = 0; i < groupCount; i++)
+            {
+                int memberIndex = indices[i];
+                int x = columns > 0 ? memberIndex % columns : boardModel.X(memberIndex);
+                int y = columns > 0 ? memberIndex / columns : boardModel.Y(memberIndex);
+                if (x < 0 || x >= columns || y < 0 || y >= rows)
+                {
+                    continue;
+                }
+
+                Node targetNode = nodeGrid[x, y];
+                Block member = targetNode != null ? targetNode.OccupiedBlock : null;
+                if (member == null || !member.IsSpecialVariant)
+                {
+                    continue;
+                }
+
+                if (!TryBuildSearchData(member, out BlockSearchData specialSearch))
+                {
+                    continue;
+                }
+
+                int specialCount = member.GatherSearchResults(specialSearch);
+                if (specialCount <= 0)
+                {
+                    continue;
+                }
+
+                EnqueueChainGroup(specialSearch.ResultBuffer, specialCount);
+            }
+
+            // Phase 2: clear current group's regular blocks first.
+            for (int i = 0; i < groupCount; i++)
+            {
+                int memberIndex = indices[i];
+                int x = columns > 0 ? memberIndex % columns : boardModel.X(memberIndex);
+                int y = columns > 0 ? memberIndex / columns : boardModel.Y(memberIndex);
+                if (x < 0 || x >= columns || y < 0 || y >= rows)
+                {
+                    ClearModelCell(memberIndex);
+                    continue;
+                }
+
+                Node targetNode = nodeGrid[x, y];
+                if (targetNode == null)
+                {
+                    ClearModelCell(memberIndex);
+                    continue;
+                }
+
+                Block member = targetNode.OccupiedBlock;
+                if (member != null)
+                {
+                    if (member.IsSpecialVariant)
+                    {
+                        pendingSpecialClears.Add(new SpecialClearEntry
+                        {
+                            Block = member,
+                            Node = targetNode,
+                            ModelIndex = memberIndex
+                        });
+                        continue;
+                    }
+
+                    targetNode.OccupiedBlock = null;
+                    if (gridManager != null)
+                    {
+                        gridManager.FreeNodes.Add(targetNode);
+                    }
+                    PlayBlockBlastEffect(member);
+                    ReleaseBlock(member);
+                    clearedAny = true;
+                }
+                else if (gridManager != null)
+                {
+                    gridManager.FreeNodes.Add(targetNode);
+                }
+
+                ClearModelCell(memberIndex);
+            }
+
+            // Phase 3: clear pending special blocks after regulars are gone.
+            for (int i = 0; i < pendingSpecialClears.Count; i++)
+            {
+                SpecialClearEntry entry = pendingSpecialClears[i];
+                Node targetNode = entry.Node;
+                Block special = entry.Block;
+
+                if (targetNode != null && targetNode.OccupiedBlock == special)
+                {
+                    targetNode.OccupiedBlock = null;
+                    if (gridManager != null)
+                    {
+                        gridManager.FreeNodes.Add(targetNode);
+                    }
+                }
+
+                if (special != null)
+                {
+                    PlayBlockBlastEffect(special);
+                    ReleaseBlock(special);
+                    clearedAny = true;
+                }
+
+                ClearModelCell(entry.ModelIndex);
+            }
+
+            ReleaseChainBuffer(indices);
+        }
+
+        processedClearIndices.Clear();
+        pendingChainGroups.Clear();
+        return clearedAny;
+    }
+
+    private void TrySpawnSpecialBlock(GroupContext context, Node originNode)
+    {
+        if (originNode == null || originNode.OccupiedBlock != null)
+        {
+            return;
+        }
+
+        if (!TryResolveSpecialBlockSpawn(context, out Block.BlockArchetype archetype, out int blockType))
+        {
+            return;
+        }
+
+        Block spawned = SpawnBlockOfType(blockType, originNode, archetype);
+        if (spawned == null)
+        {
+            Debug.LogWarning($"Failed to spawn special block {archetype} for block type {blockType}. Ensure prefab is registered in GameModeConfig.");
+            return;
+        }
+
+        if (spawned is ColorClearBlock colorClear)
+        {
+            colorClear.ConfigureTargetColor(context.BlockType);
+        }
+    }
+
+    private bool TryBuildSearchData(Block block, out BlockSearchData searchData)
+    {
+        searchData = default;
+        if (block == null || boardModel == null || gridManager == null)
+        {
+            return false;
+        }
+
+        Node[,] nodeGrid = gridManager.NodeGrid;
+        Node blockNode = block.node;
+        if (nodeGrid == null || blockNode == null)
+        {
+            return false;
+        }
+
+        Vector2Int gridPos = blockNode.gridPosition;
+        int startIndex = boardModel.Index(gridPos.x, gridPos.y);
+        if (startIndex < 0)
+        {
+            return false;
+        }
+
+        EnsureGroupBuffers();
+        int stamp = AcquireVisitStamp();
+        searchData = new BlockSearchData(boardModel, nodeGrid, startIndex, gridPos.x, gridPos.y,
+            groupIndicesBuffer, bfsQueue, visitedStamps, stamp);
         return true;
+    }
+
+    private bool TryResolveSpecialBlockSpawn(GroupContext context, out Block.BlockArchetype archetype, out int blockType)
+    {
+        archetype = Block.BlockArchetype.Regular;
+        blockType = context.BlockType;
+
+        if (!context.IsValid)
+        {
+            return false;
+        }
+
+        Block originBlock = context.Origin;
+        if (originBlock == null || originBlock.IsSpecialVariant)
+        {
+            return false;
+        }
+
+        GameManager manager = GameManager.Instance;
+        if (manager == null || !manager.IsGameMode)
+        {
+            return false;
+        }
+
+        var thresholds = manager.ActiveSpecialBlockThresholds;
+        if (thresholds == null || thresholds.Count == 0)
+        {
+            return false;
+        }
+
+        BoardSettings settings = Settings;
+        if (settings == null)
+        {
+            return false;
+        }
+
+        GameModeConfig.SpecialBlockThreshold selected = default;
+        int selectedSize = 0;
+        bool found = false;
+
+        for (int i = 0; i < thresholds.Count; i++)
+        {
+            GameModeConfig.SpecialBlockThreshold entry = thresholds[i];
+            int required = entry.ResolveMinimumGroupSize(settings);
+            if (required <= 0)
+            {
+                continue;
+            }
+
+            if (context.GroupSize >= required && required >= selectedSize)
+            {
+                selected = entry;
+                selectedSize = required;
+                found = true;
+            }
+        }
+
+        if (!found)
+        {
+            return false;
+        }
+
+        archetype = selected.SpawnArchetype;
+        blockType = selected.ResolveSpawnBlockType(context.BlockType);
+        return true;
+    }
+
+    private void EnqueueChainGroup(int[] source, int count)
+    {
+        if (source == null || count <= 0 || boardModel == null)
+        {
+            return;
+        }
+
+        int[] buffer = AcquireChainBuffer(count);
+        int accepted = 0;
+        for (int i = 0; i < count; i++)
+        {
+            int index = source[i];
+            if (!boardModel.IsValidIndex(index))
+            {
+                continue;
+            }
+
+            if (!processedClearIndices.Add(index))
+            {
+                continue;
+            }
+
+            buffer[accepted++] = index;
+        }
+
+        if (accepted > 0)
+        {
+            pendingChainGroups.Enqueue(new ChainClearGroup
+            {
+                Indices = buffer,
+                Count = accepted
+            });
+        }
+        else
+        {
+            ReleaseChainBuffer(buffer);
+        }
+    }
+
+    private int[] AcquireChainBuffer(int minSize)
+    {
+        int required = Mathf.Max(1, minSize);
+        if (chainBufferPool.Count > 0)
+        {
+            int[] buffer = chainBufferPool.Pop();
+            if (buffer.Length < required)
+            {
+                Array.Resize(ref buffer, required);
+            }
+            return buffer;
+        }
+
+        return new int[required];
+    }
+
+    private void ReleaseChainBuffer(int[] buffer)
+    {
+        if (buffer == null)
+        {
+            return;
+        }
+
+        chainBufferPool.Push(buffer);
     }
 
     public void ResolveFalling()
@@ -578,11 +932,50 @@ public class BlockManager : MonoBehaviour
 
         blockPool.transform.SetParent(transform);
         int totalCells = Mathf.Max(1, settings.Rows * settings.Columns);
-        blockPool.Initialize(settings.BlockPrefabs, totalCells, 1.2f);
+        Block[] pooledPrefabs = BuildPoolPrefabArray(settings);
+        blockPool.Initialize(pooledPrefabs, totalCells, 1.2f);
         blockPool.InitializeEffects(settings.BlockPrefabs, settings.BlastEffectPrefabs);
     }
 
-    private Block SpawnBlockFromPool(int blockType, Transform parent)
+    private Block[] BuildPoolPrefabArray(BoardSettings settings)
+    {
+        poolPrefabsBuffer.Clear();
+
+        if (settings != null && settings.BlockPrefabs != null)
+        {
+            for (int i = 0; i < settings.BlockPrefabs.Length; i++)
+            {
+                Block prefab = settings.BlockPrefabs[i];
+                if (prefab != null)
+                {
+                    poolPrefabsBuffer.Add(prefab);
+                }
+            }
+        }
+
+        GameModeConfig config = GameManager.Instance != null ? GameManager.Instance.ActiveGameModeConfig : null;
+        if (config != null)
+        {
+            var specialPrefabs = config.SpecialBlockPrefabs;
+            for (int i = 0; i < specialPrefabs.Count; i++)
+            {
+                Block extraPrefab = specialPrefabs[i].Prefab;
+                if (extraPrefab != null)
+                {
+                    poolPrefabsBuffer.Add(extraPrefab);
+                }
+            }
+        }
+
+        if (poolPrefabsBuffer.Count == 0)
+        {
+            return Array.Empty<Block>();
+        }
+
+        return poolPrefabsBuffer.ToArray();
+    }
+
+    private Block SpawnBlockFromPool(int blockType, Transform parent, Block.BlockArchetype archetype = Block.BlockArchetype.Regular)
     {
         if (blockPool == null)
         {
@@ -591,7 +984,7 @@ public class BlockManager : MonoBehaviour
         }
 
         EnsureBlocksRoot();
-        return blockPool.Spawn(blockType, blocksRoot != null ? blocksRoot : parent);
+        return blockPool.Spawn(blockType, archetype, blocksRoot != null ? blocksRoot : parent);
     }
 
     private void ReleaseBlock(Block block)
@@ -689,6 +1082,11 @@ public class BlockManager : MonoBehaviour
                 int groupCount = GatherGroupIndices(index);
                 if (groupCount <= 0)
                 {
+                    if (cachedGroupSizes != null)
+                    {
+                        cachedGroupSizes[index] = 0;
+                        cachedGroupStamps[index] = groupEvaluationStamp;
+                    }
                     continue;
                 }
 
@@ -1322,14 +1720,14 @@ public class BlockManager : MonoBehaviour
         return true;
     }
 
-    private Block SpawnBlockOfType(int blockType, Node targetNode)
+    private Block SpawnBlockOfType(int blockType, Node targetNode, Block.BlockArchetype archetype = Block.BlockArchetype.Regular)
     {
         if (targetNode == null)
         {
             return null;
         }
 
-        Block spawned = SpawnBlockFromPool(blockType, targetNode.transform);
+        Block spawned = SpawnBlockFromPool(blockType, targetNode.transform, archetype);
         if (spawned == null)
         {
             return null;
@@ -1415,13 +1813,13 @@ public class BlockManager : MonoBehaviour
                 return 0;
             }
 
-            if (!boardModel.IsValidIndex(startIndex))
+            if (!boardModel.IsValidIndex(startIndex) || !boardModel.IsOccupied(startIndex))
             {
                 return 0;
             }
 
-            Cell startCell = boardModel.GetCell(startIndex);
-            if (!startCell.occupied)
+            Node[,] nodeGrid = gridManager != null ? gridManager.NodeGrid : null;
+            if (nodeGrid == null)
             {
                 return 0;
             }
@@ -1433,52 +1831,23 @@ public class BlockManager : MonoBehaviour
                 return 0;
             }
 
+            int startX = columns > 0 ? startIndex % columns : boardModel.X(startIndex);
+            int startY = columns > 0 ? startIndex / columns : boardModel.Y(startIndex);
+            if (startX < 0 || startY < 0 || startX >= columns || startY >= rows)
+            {
+                return 0;
+            }
+
+            Block startBlock = nodeGrid[startX, startY]?.OccupiedBlock;
+            if (startBlock == null || !startBlock.CanParticipateInGroup)
+            {
+                return 0;
+            }
+
             int stamp = AcquireVisitStamp();
-            int head = 0;
-            int tail = 0;
-            bfsQueue[tail++] = startIndex;
-            visitedStamps[startIndex] = stamp;
-            int groupCount = 0;
-            byte colorId = startCell.colorId;
-
-            while (head < tail)
-            {
-                int current = bfsQueue[head++];
-                groupIndicesBuffer[groupCount++] = current;
-
-                int cx = columns > 0 ? current % columns : boardModel.X(current);
-                int cy = columns > 0 ? current / columns : boardModel.Y(current);
-
-                TryVisit(cx - 1, cy);
-                TryVisit(cx + 1, cy);
-                TryVisit(cx, cy - 1);
-                TryVisit(cx, cy + 1);
-            }
-
-            return groupCount;
-
-            void TryVisit(int x, int y)
-            {
-                if (x < 0 || x >= columns || y < 0 || y >= rows)
-                {
-                    return;
-                }
-
-                int index = y * columns + x;
-                if (visitedStamps[index] == stamp)
-                {
-                    return;
-                }
-
-                Cell cell = boardModel.GetCell(index);
-                if (!cell.occupied || cell.colorId != colorId)
-                {
-                    return;
-                }
-
-                visitedStamps[index] = stamp;
-                bfsQueue[tail++] = index;
-            }
+            var searchData = new BlockSearchData(boardModel, nodeGrid, startIndex, startX, startY,
+                groupIndicesBuffer, bfsQueue, visitedStamps, stamp);
+            return startBlock.GatherSearchResults(searchData);
         }
     }
 
@@ -2101,5 +2470,18 @@ public class BlockManager : MonoBehaviour
 
         SwapNodeBlock(movingNode, targetNode);
         return true;
+    }
+
+    private struct ChainClearGroup
+    {
+        public int[] Indices;
+        public int Count;
+    }
+
+    private struct SpecialClearEntry
+    {
+        public Block Block;
+        public Node Node;
+        public int ModelIndex;
     }
 }

@@ -10,8 +10,8 @@ GameObject:
   m_Component:
   - component: {fileID: 3216822030193634071}
   - component: {fileID: 6660801491848553797}
-  - component: {fileID: 6117569212860040427}
   - component: {fileID: 3876964471558161001}
+  - component: {fileID: 4982964331940292706}
   m_Layer: 0
   m_Name: Yellow
   m_TagString: Untagged
@@ -93,26 +93,6 @@ SpriteRenderer:
   m_SpriteTileMode: 0
   m_WasSpriteAssigned: 1
   m_SpriteSortPoint: 0
---- !u!114 &6117569212860040427
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 7313523251230437707}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 734ddc900c55d4fe0bb253acec876816, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  node: {fileID: 0}
-  blockType: 5
-  spriteRenderer: {fileID: 6660801491848553797}
-  defaultIcon: {fileID: 7985042018138347892, guid: a90ade7f683964116b0fdf5404a4cb9d, type: 3}
-  tierOneIcon: {fileID: 414921610477409366, guid: cd986df99988748c8b513b9439acb2b7, type: 3}
-  tierTwoIcon: {fileID: -6038182108957047188, guid: 7e46917b228ed46a49be6fe28c038a69, type: 3}
-  tierThreeIcon: {fileID: -7586140276444505714, guid: b7f432880189a40a1a006b59849bbeb4, type: 3}
-  baseLocalScale: {x: 0.45, y: 0.45, z: 1}
 --- !u!61 &3876964471558161001
 BoxCollider2D:
   m_ObjectHideFlags: 0
@@ -159,3 +139,24 @@ BoxCollider2D:
   m_AutoTiling: 0
   m_Size: {x: 2.26, y: 2.56}
   m_EdgeRadius: 0
+--- !u!114 &4982964331940292706
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 7313523251230437707}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 63d0ed0f556af410480a586220bf01ba, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::RegularBlock
+  node: {fileID: 0}
+  blockType: 5
+  archetype: 0
+  spriteRenderer: {fileID: 6660801491848553797}
+  defaultIcon: {fileID: 7985042018138347892, guid: a90ade7f683964116b0fdf5404a4cb9d, type: 3}
+  tierOneIcon: {fileID: 414921610477409366, guid: cd986df99988748c8b513b9439acb2b7, type: 3}
+  tierTwoIcon: {fileID: -6038182108957047188, guid: 7e46917b228ed46a49be6fe28c038a69, type: 3}
+  tierThreeIcon: {fileID: -7586140276444505714, guid: b7f432880189a40a1a006b59849bbeb4, type: 3}
+  baseLocalScale: {x: 0.45, y: 0.45, z: 1}
