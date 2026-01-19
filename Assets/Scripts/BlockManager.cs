@@ -22,6 +22,11 @@ public class BlockManager : MonoBehaviour
     private static readonly ProfilerMarker FallingMarker = new ProfilerMarker("BlockManager.ResolveFalling");
     private static readonly ProfilerMarker SpawnBlocksMarker = new ProfilerMarker("BlockManager.SpawnBlocks");
     private static readonly ProfilerMarker ShuffleMarker = new ProfilerMarker("BlockManager.TryShuffleBoard");
+    private static readonly ProfilerMarker GroupDetectionMarker = new ProfilerMarker("BlockManager.GroupDetection");
+    private static readonly ProfilerMarker IconTierUpdateMarker = new ProfilerMarker("BlockManager.IconTierUpdate");
+    private static readonly ProfilerMarker GravityCompactionMarker = new ProfilerMarker("BlockManager.GravityCompaction");
+    private static readonly ProfilerMarker RefillMarker = new ProfilerMarker("BlockManager.Refill");
+    private static readonly ProfilerMarker DeadlockCheckMarker = new ProfilerMarker("BlockManager.DeadlockCheck");
 
     private const int MaxColorIds = 256;
     private readonly List<BlockMove> blockMoves = new List<BlockMove>(64);
@@ -179,6 +184,7 @@ public class BlockManager : MonoBehaviour
         }
 
         using (FallingMarker.Auto())
+        using (GravityCompactionMarker.Auto())
         {
             Node[,] nodeGrid = gridManager.NodeGrid;
             BoardSettings settings = Settings;
@@ -500,6 +506,7 @@ public class BlockManager : MonoBehaviour
         }
 
         using (SpawnBlocksMarker.Auto())
+        using (RefillMarker.Auto())
         {
             gridManager.UpdateFreeNodes();
             float dropDuration = Mathf.Max(0f, blockDropDuration);
@@ -649,61 +656,64 @@ public class BlockManager : MonoBehaviour
 
         int maxIndex = boardModel.CellCount;
 
-        for (int i = 0; i < dirtyCount; i++)
+        using (IconTierUpdateMarker.Auto())
         {
-            int index = dirtyIndices[i];
-            if (index < 0 || index >= maxIndex)
+            for (int i = 0; i < dirtyCount; i++)
             {
-                continue;
-            }
-
-            if (dirtyFlags != null)
-            {
-                dirtyFlags[index] = false;
-            }
-
-            if (cachedGroupStamps != null && cachedGroupStamps[index] == groupEvaluationStamp)
-            {
-                continue;
-            }
-
-            if (!boardModel.IsOccupied(index))
-            {
-                if (cachedGroupStamps != null)
-                {
-                    cachedGroupStamps[index] = groupEvaluationStamp;
-                    cachedGroupSizes[index] = 0;
-                }
-                continue;
-            }
-
-            int groupCount = GatherGroupIndices(index);
-            if (groupCount <= 0)
-            {
-                continue;
-            }
-
-            for (int j = 0; j < groupCount; j++)
-            {
-                int memberIndex = groupIndicesBuffer[j];
-                if (cachedGroupSizes != null)
-                {
-                    cachedGroupSizes[memberIndex] = groupCount;
-                    cachedGroupStamps[memberIndex] = groupEvaluationStamp;
-                }
-
-                int memberX = columns > 0 ? memberIndex % columns : boardModel.X(memberIndex);
-                int memberY = columns > 0 ? memberIndex / columns : boardModel.Y(memberIndex);
-                if (memberX < 0 || memberX >= columns || memberY < 0 || memberY >= rows)
+                int index = dirtyIndices[i];
+                if (index < 0 || index >= maxIndex)
                 {
                     continue;
                 }
 
-                Node memberNode = nodeGrid[memberX, memberY];
-                Block memberBlock = memberNode?.OccupiedBlock;
-                if (memberBlock != null)
+                if (dirtyFlags != null)
                 {
-                    memberBlock.ApplyGroupIcon(groupCount, settings);
+                    dirtyFlags[index] = false;
+                }
+
+                if (cachedGroupStamps != null && cachedGroupStamps[index] == groupEvaluationStamp)
+                {
+                    continue;
+                }
+
+                if (!boardModel.IsOccupied(index))
+                {
+                    if (cachedGroupStamps != null)
+                    {
+                        cachedGroupStamps[index] = groupEvaluationStamp;
+                        cachedGroupSizes[index] = 0;
+                    }
+                    continue;
+                }
+
+                int groupCount = GatherGroupIndices(index);
+                if (groupCount <= 0)
+                {
+                    continue;
+                }
+
+                for (int j = 0; j < groupCount; j++)
+                {
+                    int memberIndex = groupIndicesBuffer[j];
+                    if (cachedGroupSizes != null)
+                    {
+                        cachedGroupSizes[memberIndex] = groupCount;
+                        cachedGroupStamps[memberIndex] = groupEvaluationStamp;
+                    }
+
+                    int memberX = columns > 0 ? memberIndex % columns : boardModel.X(memberIndex);
+                    int memberY = columns > 0 ? memberIndex / columns : boardModel.Y(memberIndex);
+                    if (memberX < 0 || memberX >= columns || memberY < 0 || memberY >= rows)
+                    {
+                        continue;
+                    }
+
+                    Node memberNode = nodeGrid[memberX, memberY];
+                    Block memberBlock = memberNode?.OccupiedBlock;
+                    if (memberBlock != null)
+                    {
+                        memberBlock.ApplyGroupIcon(groupCount, settings);
+                    }
                 }
             }
         }
@@ -1398,74 +1408,77 @@ public class BlockManager : MonoBehaviour
 
     private int GatherGroupIndices(int startIndex)
     {
-        if (boardModel == null || bfsQueue == null || groupIndicesBuffer == null || visitedStamps == null)
+        using (GroupDetectionMarker.Auto())
         {
-            return 0;
-        }
-
-        if (!boardModel.IsValidIndex(startIndex))
-        {
-            return 0;
-        }
-
-        Cell startCell = boardModel.GetCell(startIndex);
-        if (!startCell.occupied)
-        {
-            return 0;
-        }
-
-        int columns = boardModel.Columns;
-        int rows = boardModel.Rows;
-        if (columns <= 0 || rows <= 0)
-        {
-            return 0;
-        }
-
-        int stamp = AcquireVisitStamp();
-        int head = 0;
-        int tail = 0;
-        bfsQueue[tail++] = startIndex;
-        visitedStamps[startIndex] = stamp;
-        int groupCount = 0;
-        byte colorId = startCell.colorId;
-
-        while (head < tail)
-        {
-            int current = bfsQueue[head++];
-            groupIndicesBuffer[groupCount++] = current;
-
-            int cx = columns > 0 ? current % columns : boardModel.X(current);
-            int cy = columns > 0 ? current / columns : boardModel.Y(current);
-
-            TryVisit(cx - 1, cy);
-            TryVisit(cx + 1, cy);
-            TryVisit(cx, cy - 1);
-            TryVisit(cx, cy + 1);
-        }
-
-        return groupCount;
-
-        void TryVisit(int x, int y)
-        {
-            if (x < 0 || x >= columns || y < 0 || y >= rows)
+            if (boardModel == null || bfsQueue == null || groupIndicesBuffer == null || visitedStamps == null)
             {
-                return;
+                return 0;
             }
 
-            int index = y * columns + x;
-            if (visitedStamps[index] == stamp)
+            if (!boardModel.IsValidIndex(startIndex))
             {
-                return;
+                return 0;
             }
 
-            Cell cell = boardModel.GetCell(index);
-            if (!cell.occupied || cell.colorId != colorId)
+            Cell startCell = boardModel.GetCell(startIndex);
+            if (!startCell.occupied)
             {
-                return;
+                return 0;
             }
 
-            visitedStamps[index] = stamp;
-            bfsQueue[tail++] = index;
+            int columns = boardModel.Columns;
+            int rows = boardModel.Rows;
+            if (columns <= 0 || rows <= 0)
+            {
+                return 0;
+            }
+
+            int stamp = AcquireVisitStamp();
+            int head = 0;
+            int tail = 0;
+            bfsQueue[tail++] = startIndex;
+            visitedStamps[startIndex] = stamp;
+            int groupCount = 0;
+            byte colorId = startCell.colorId;
+
+            while (head < tail)
+            {
+                int current = bfsQueue[head++];
+                groupIndicesBuffer[groupCount++] = current;
+
+                int cx = columns > 0 ? current % columns : boardModel.X(current);
+                int cy = columns > 0 ? current / columns : boardModel.Y(current);
+
+                TryVisit(cx - 1, cy);
+                TryVisit(cx + 1, cy);
+                TryVisit(cx, cy - 1);
+                TryVisit(cx, cy + 1);
+            }
+
+            return groupCount;
+
+            void TryVisit(int x, int y)
+            {
+                if (x < 0 || x >= columns || y < 0 || y >= rows)
+                {
+                    return;
+                }
+
+                int index = y * columns + x;
+                if (visitedStamps[index] == stamp)
+                {
+                    return;
+                }
+
+                Cell cell = boardModel.GetCell(index);
+                if (!cell.occupied || cell.colorId != colorId)
+                {
+                    return;
+                }
+
+                visitedStamps[index] = stamp;
+                bfsQueue[tail++] = index;
+            }
         }
     }
 
@@ -1881,58 +1894,61 @@ public class BlockManager : MonoBehaviour
 
     private bool ModelHasValidMove()
     {
-        if (boardModel == null)
+        using (DeadlockCheckMarker.Auto())
         {
-            return false;
-        }
-
-        int columns = boardModel.Columns;
-        int rows = boardModel.Rows;
-        if (columns <= 0 || rows <= 0)
-        {
-            return false;
-        }
-
-        for (int y = 0; y < rows; y++)
-        {
-            for (int x = 0; x < columns; x++)
+            if (boardModel == null)
             {
-                int index = boardModel.Index(x, y);
-                if (index < 0)
-                {
-                    continue;
-                }
+                return false;
+            }
 
-                Cell cell = boardModel.GetCell(index);
-                if (!cell.occupied)
-                {
-                    continue;
-                }
+            int columns = boardModel.Columns;
+            int rows = boardModel.Rows;
+            if (columns <= 0 || rows <= 0)
+            {
+                return false;
+            }
 
-                byte color = cell.colorId;
-                int rightIndex = boardModel.Index(x + 1, y);
-                if (rightIndex >= 0)
+            for (int y = 0; y < rows; y++)
+            {
+                for (int x = 0; x < columns; x++)
                 {
-                    Cell rightCell = boardModel.GetCell(rightIndex);
-                    if (rightCell.occupied && rightCell.colorId == color)
+                    int index = boardModel.Index(x, y);
+                    if (index < 0)
                     {
-                        return true;
+                        continue;
                     }
-                }
 
-                int upIndex = boardModel.Index(x, y + 1);
-                if (upIndex >= 0)
-                {
-                    Cell upCell = boardModel.GetCell(upIndex);
-                    if (upCell.occupied && upCell.colorId == color)
+                    Cell cell = boardModel.GetCell(index);
+                    if (!cell.occupied)
                     {
-                        return true;
+                        continue;
+                    }
+
+                    byte color = cell.colorId;
+                    int rightIndex = boardModel.Index(x + 1, y);
+                    if (rightIndex >= 0)
+                    {
+                        Cell rightCell = boardModel.GetCell(rightIndex);
+                        if (rightCell.occupied && rightCell.colorId == color)
+                        {
+                            return true;
+                        }
+                    }
+
+                    int upIndex = boardModel.Index(x, y + 1);
+                    if (upIndex >= 0)
+                    {
+                        Cell upCell = boardModel.GetCell(upIndex);
+                        if (upCell.occupied && upCell.colorId == color)
+                        {
+                            return true;
+                        }
                     }
                 }
             }
-        }
 
-        return false;
+            return false;
+        }
     }
 
     private int FindNeighbourIndex(int index)
