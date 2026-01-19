@@ -88,9 +88,9 @@
 - [x] **Tween/Animation Budget (Reduce per-block allocations)**
   - Replace per-block DOTween sequences in hot paths with a lightweight custom tween runner or simplified DOTween usage (no nested sequences).
   - Fix shuffle scale drift permanently by storing an immutable `baseScale` per block and always animating relative to it.
-- [ ] **Grid/Node Lifecycle (Eliminate regenerate spikes)**
-  - Prewarm a max 10×10 node grid once and enable/disable nodes on resize instead of destroying/recreating them.
-  - Avoid destroying `gridRoot` during regenerate; reuse transforms to keep memory stable.
+- [x] **Grid/Node Lifecycle (Eliminate regenerate spikes)**
+  - Board configuration UI now just updates the shared `BoardSettings` asset (rows/columns + thresholds) on the Main Menu; gameplay scenes build a fresh grid once at load.
+  - Grid/board objects are instantiated once per scene load (no runtime regenerate button); to test new sizes, exit to Main Menu, edit settings, and reload the scene.
 - [ ] **Memory & Collections Hygiene**
   - Replace dictionaries with arrays/lists wherever indices suffice (node grids, views, cells).
   - Pre-size lists and reuse buffers; avoid LINQ/yield patterns in hot loops to prevent hidden allocations.

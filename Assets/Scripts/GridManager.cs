@@ -20,8 +20,8 @@ public class GridManager : MonoBehaviour
     };
 
     private readonly Vector3[] playableAreaCorners = new Vector3[4];
-    private Dictionary<Vector2Int, Node> nodes = new Dictionary<Vector2Int, Node>();
-    private HashSet<Node> freeNodes = new HashSet<Node>();
+    private readonly Dictionary<Vector2Int, Node> nodes = new Dictionary<Vector2Int, Node>();
+    private readonly HashSet<Node> freeNodes = new HashSet<Node>();
     private Node[,] nodeGrid;
     private Transform gridRoot;
     private GameObject boardInstance;
@@ -36,21 +36,8 @@ public class GridManager : MonoBehaviour
 
     public void InitializeGrid()
     {
-        if (boardSettings == null)
+        if (!ValidateBoardSettings())
         {
-            Debug.LogError("GridManager is missing BoardSettings reference.");
-            return;
-        }
-
-        if (!boardSettings.IsValid(out string validationMessage))
-        {
-            Debug.LogError($"Invalid BoardSettings: {validationMessage}");
-            return;
-        }
-
-        if (nodePrefab == null)
-        {
-            Debug.LogError("GridManager is missing Node prefab reference.");
             return;
         }
 
@@ -64,42 +51,27 @@ public class GridManager : MonoBehaviour
         UpdateFreeNodes();
     }
 
-    public void UpdateFreeNodes()
+    private bool ValidateBoardSettings()
     {
-        freeNodes.Clear();
-        foreach (var node in nodes.Values)
+        if (boardSettings == null)
         {
-            if (node.OccupiedBlock == null)
-            {
-                freeNodes.Add(node);
-            }
-        }
-    }
-
-    public IEnumerable<Block> GetMatchingNeighbours(Block block)
-    {
-        if (block == null || block.node == null)
-        {
-            yield break;
+            Debug.LogError("GridManager is missing BoardSettings reference.");
+            return false;
         }
 
-        foreach (var dir in CardinalDirections)
+        if (!boardSettings.IsValid(out string validationMessage))
         {
-            Vector2Int neighbourPosition = block.node.gridPosition + dir;
-            if (nodes.TryGetValue(neighbourPosition, out Node neighbourNode))
-            {
-                Block neighbourBlock = neighbourNode.OccupiedBlock;
-                if (neighbourBlock != null && neighbourBlock.blockType == block.blockType)
-                {
-                    yield return neighbourBlock;
-                }
-            }
+            Debug.LogError($"Invalid BoardSettings: {validationMessage}");
+            return false;
         }
-    }
 
-    public Vector3 GetGridCenter()
-    {
-        return gridWorldCenter;
+        if (nodePrefab == null)
+        {
+            Debug.LogError("GridManager is missing Node prefab reference.");
+            return false;
+        }
+
+        return true;
     }
 
     private void CreateNodes()
@@ -161,6 +133,45 @@ public class GridManager : MonoBehaviour
         gridRoot = new GameObject("GridRoot").transform;
         gridRoot.position = boardCenter;
     }
+
+    public void UpdateFreeNodes()
+    {
+        freeNodes.Clear();
+        foreach (var node in nodes.Values)
+        {
+            if (node.OccupiedBlock == null)
+            {
+                freeNodes.Add(node);
+            }
+        }
+    }
+
+    public IEnumerable<Block> GetMatchingNeighbours(Block block)
+    {
+        if (block == null || block.node == null)
+        {
+            yield break;
+        }
+
+        foreach (var dir in CardinalDirections)
+        {
+            Vector2Int neighbourPosition = block.node.gridPosition + dir;
+            if (nodes.TryGetValue(neighbourPosition, out Node neighbourNode))
+            {
+                Block neighbourBlock = neighbourNode.OccupiedBlock;
+                if (neighbourBlock != null && neighbourBlock.blockType == block.blockType)
+                {
+                    yield return neighbourBlock;
+                }
+            }
+        }
+    }
+
+    public Vector3 GetGridCenter()
+    {
+        return gridWorldCenter;
+    }
+
 
     private Vector3 CalculateBoardScaleForGrid(GameObject instance)
     {

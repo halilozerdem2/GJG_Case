@@ -147,19 +147,6 @@ public class GameManager : MonoBehaviour
         ChangeState(GameState.SpawningBlocks);
     }
 
-    public void RegenerateBoardFromSettings()
-    {
-        if (gridManager == null || blockManager == null)
-        {
-            return;
-        }
-
-        StopAllCoroutines();
-        blockManager.StopAllCoroutines();
-        blockManager.DestroyAllBlocks();
-        ChangeState(GameState.GenerateLevel);
-    }
-
     public void ForceShuffleInProgress()
     {
         _state = GameState.Pause;

@@ -134,6 +134,13 @@ public class BoardSettings : ScriptableObject
         columns = Mathf.Clamp(newColumns, MinSize, MaxSize);
     }
 
+    public void ApplyThresholds(int newThresholdA, int newThresholdB, int newThresholdC)
+    {
+        thresholdA = Mathf.Max(2, newThresholdA);
+        thresholdB = Mathf.Max(thresholdA + 1, newThresholdB);
+        thresholdC = Mathf.Max(thresholdB + 1, newThresholdC);
+    }
+
     private bool ValidateBlockPrefabs(out string message)
     {
         message = string.Empty;
