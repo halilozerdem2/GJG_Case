@@ -5,6 +5,10 @@ public class StaticBlock : Block
 {
     public override bool CanParticipateInGroup => false;
 
+    [SerializeField] private ParticleSystem staticBlastEffect;
+
+    public ParticleSystem StaticBlastEffect => staticBlastEffect;
+
     public override int GatherSearchResults(BlockSearchData searchData)
     {
         return 0;

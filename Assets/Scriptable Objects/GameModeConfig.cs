@@ -6,6 +6,7 @@ using UnityEngine;
 public class GameModeConfig : ScriptableObject
 {
     [SerializeField] private string configId = "Game";
+    [SerializeField] private BoardSettings boardSettings;
     [SerializeField] private MoveTimeLimitSettings limits = MoveTimeLimitSettings.Default;
     [SerializeField] private List<PowerupCooldownEntry> powerupCooldowns = new List<PowerupCooldownEntry>();
     [SerializeField] private List<SpecialBlockThreshold> specialBlockThresholds = new List<SpecialBlockThreshold>();
@@ -18,6 +19,7 @@ public class GameModeConfig : ScriptableObject
     private static readonly SpecialBlockPrefab[] EmptySpecialBlockPrefabs = Array.Empty<SpecialBlockPrefab>();
 
     public string ConfigId => configId;
+    public BoardSettings BoardSettings => boardSettings;
     public MoveTimeLimitSettings Limits => limits;
     public IReadOnlyList<PowerupCooldownEntry> PowerupCooldowns => powerupCooldowns != null ? powerupCooldowns : (IReadOnlyList<PowerupCooldownEntry>)EmptyPowerupCooldowns;
     public IReadOnlyList<SpecialBlockThreshold> SpecialBlockThresholds => specialBlockThresholds != null ? specialBlockThresholds : (IReadOnlyList<SpecialBlockThreshold>)EmptySpecialBlockThresholds;
@@ -177,14 +179,19 @@ public class GameModeConfig : ScriptableObject
     public struct StaticTargetSpawn
     {
         [SerializeField] private Block targetPrefab;
-        [SerializeField, Min(0)] private int minPerBoard;
-        [SerializeField, Min(0)] private int maxPerBoard;
-        [SerializeField, Range(0f, 1f)] private float normalizedWeight;
+        [SerializeField] private StaticPlacementMask placementMask;
 
         public Block TargetPrefab => targetPrefab;
-        public int MinPerBoard => Mathf.Max(0, Mathf.Min(minPerBoard, maxPerBoard));
-        public int MaxPerBoard => Mathf.Max(MinPerBoard, maxPerBoard);
-        public float NormalizedWeight => Mathf.Clamp01(normalizedWeight);
+        public StaticPlacementMask PlacementMask => placementMask;
+    }
+
+    [Serializable]
+    public struct StaticPlacementMask
+    {
+        [SerializeField] private bool[] customCells;
+
+        public bool[] CustomCells => customCells;
+        public bool IsValid => customCells != null && customCells.Length > 0;
     }
 
     [Serializable]

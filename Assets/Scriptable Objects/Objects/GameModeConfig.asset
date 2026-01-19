@@ -13,11 +13,12 @@ MonoBehaviour:
   m_Name: GameModeConfig
   m_EditorClassIdentifier: Assembly-CSharp::GameModeConfig
   configId: Game
+  boardSettings: {fileID: 11400000, guid: 2600e121bae2048f9818ec778afa5db2, type: 2}
   limits:
-    useMoveLimit: 0
-    moveLimit: 0
-    useTimeLimit: 0
-    timeLimitSeconds: 0
+    useMoveLimit: 1
+    moveLimit: 10
+    useTimeLimit: 1
+    timeLimitSeconds: 120
   powerupCooldowns:
   - powerup: 0
     cooldownSeconds: 3
@@ -46,9 +47,14 @@ MonoBehaviour:
     overrideBlockType: 9
   staticTargetSpawns:
   - targetPrefab: {fileID: 6284807497357251881, guid: c2b3f80a7a658452491693cdb7c7be4e, type: 3}
-    minPerBoard: 10
-    maxPerBoard: 20
-    normalizedWeight: 0.415
+    placementMask:
+      customCells: 010101010101010101010100010001000101010000000100000001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+  - targetPrefab: {fileID: 6284807497357251881, guid: 68e76db2cae794086bec47d742b1c064, type: 3}
+    placementMask:
+      customCells: 000000000000000000000000000100000000000000000000000000000000000000000000000101010101010100000000000000000000000000000000000000000000000000000000
+  - targetPrefab: {fileID: 6284807497357251881, guid: 4b8bd19e8675e412888d1b03943e28e8, type: 3}
+    placementMask:
+      customCells: 000000000000000000000001000000010000000101010001010100010101010101010101010000000000000001010000000000000001010000000000000001010000000000000001
   specialBlockPrefabs:
   - archetype: 2
     prefab: {fileID: 4669070400807551858, guid: 47df092c6ab5849bdb7e72c29bc0c224, type: 3}

@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.SceneManagement;
@@ -22,6 +23,14 @@ public class GameManager : MonoBehaviour
     private static readonly GameModeConfig.PowerupCooldownEntry[] EmptyPowerupCooldowns = Array.Empty<GameModeConfig.PowerupCooldownEntry>();
     private static readonly GameModeConfig.SpecialBlockThreshold[] EmptySpecialThresholds = Array.Empty<GameModeConfig.SpecialBlockThreshold>();
     private static readonly GameModeConfig.StaticTargetSpawn[] EmptyStaticTargets = Array.Empty<GameModeConfig.StaticTargetSpawn>();
+    private bool useMoveLimit;
+    private bool useTimeLimit;
+    private int remainingMoves;
+    private int maxMoves;
+    private float remainingTime;
+    private float maxTime;
+    private Coroutine limitTimerRoutine;
+    private bool objectivesComplete = true;
 
     public GameMode CurrentGameMode => _currentGameMode;
     public bool IsCaseMode => _currentGameMode == GameMode.Case;
@@ -31,8 +40,18 @@ public class GameManager : MonoBehaviour
     public IReadOnlyList<GameModeConfig.PowerupCooldownEntry> ActivePowerupCooldowns => _activeGameModeConfig != null ? _activeGameModeConfig.PowerupCooldowns : EmptyPowerupCooldowns;
     public IReadOnlyList<GameModeConfig.SpecialBlockThreshold> ActiveSpecialBlockThresholds => _activeGameModeConfig != null ? _activeGameModeConfig.SpecialBlockThresholds : EmptySpecialThresholds;
     public IReadOnlyList<GameModeConfig.StaticTargetSpawn> ActiveStaticTargetSpawns => _activeGameModeConfig != null ? _activeGameModeConfig.StaticTargetSpawns : EmptyStaticTargets;
+    public bool HasMoveLimit => useMoveLimit;
+    public int RemainingMoves => remainingMoves;
+    public int MaxMoves => maxMoves;
+    public bool HasTimeLimit => useTimeLimit;
+    public float RemainingTime => remainingTime;
+    public float TimeLimitSeconds => maxTime;
+    public bool AreObjectivesComplete => objectivesComplete;
 
     public event Action<GameMode> GameModeChanged;
+    public event Action<int, int> MovesChanged;
+    public event Action<float, float> TimeChanged;
+    public event Action<GameState> StateChanged;
 
     private void Awake()
     {
@@ -68,6 +87,7 @@ public class GameManager : MonoBehaviour
     private void ChangeState(GameState newState)
     {
         _state = newState;
+        StateChanged?.Invoke(_state);
         switch (newState)
         {
             case GameState.GenerateLevel:
@@ -88,8 +108,10 @@ public class GameManager : MonoBehaviour
                 blockManager.ResolveDeadlock(HandleDeadlockResolved);
                 break;
             case GameState.Win:
+                StopLimitTimer();
                 break;
             case GameState.Lose:
+                StopLimitTimer();
                 break;
             case GameState.Pause:
                 break;
@@ -109,6 +131,10 @@ public class GameManager : MonoBehaviour
         _currentGameMode = mode;
         ResolveActiveGameModeConfig(_currentGameMode);
         GameModeChanged?.Invoke(_currentGameMode);
+        if (gridManager != null && blockManager != null)
+        {
+            ApplyLimitSettings();
+        }
     }
 
     private void HandleBlocksSpawned(bool hasValidMove)
@@ -140,6 +166,7 @@ public class GameManager : MonoBehaviour
 
         if (blockManager.TryHandleBlockSelection(block))
         {
+            ConsumeMoveIfNeeded();
             ChangeState(GameState.Falling);
         }
     }
@@ -240,6 +267,7 @@ public class GameManager : MonoBehaviour
             _state = GameState.Pause;
             gridManager = null;
             blockManager = null;
+            StopLimitTimer();
             return;
         }
 
@@ -252,6 +280,7 @@ public class GameManager : MonoBehaviour
             return;
         }
 
+        ApplyLimitSettings();
         ChangeState(GameState.GenerateLevel);
     }
 
@@ -272,6 +301,130 @@ public class GameManager : MonoBehaviour
         {
             SceneManager.LoadScene(0);
         }
+    }
+
+    private void ApplyLimitSettings()
+    {
+        StopLimitTimer();
+
+        var limits = ActiveLimitSettings;
+        useMoveLimit = IsGameMode && limits.UseMoveLimit;
+        maxMoves = useMoveLimit ? Mathf.Max(0, limits.MoveLimit) : 0;
+        remainingMoves = maxMoves;
+        MovesChanged?.Invoke(remainingMoves, maxMoves);
+
+        useTimeLimit = IsGameMode && limits.UseTimeLimit;
+        maxTime = useTimeLimit ? Mathf.Max(0f, limits.TimeLimitSeconds) : 0f;
+        remainingTime = maxTime;
+        TimeChanged?.Invoke(remainingTime, maxTime);
+
+        objectivesComplete = true;
+
+        if (useTimeLimit && maxTime > 0f)
+        {
+            limitTimerRoutine = StartCoroutine(LimitTimer());
+        }
+    }
+
+    private IEnumerator LimitTimer()
+    {
+        while (useTimeLimit && remainingTime > 0f)
+        {
+            if (_state == GameState.Pause)
+            {
+                yield return null;
+                continue;
+            }
+
+            remainingTime = Mathf.Max(0f, remainingTime - Time.deltaTime);
+            TimeChanged?.Invoke(remainingTime, maxTime);
+
+            if (remainingTime <= 0f)
+            {
+                break;
+            }
+
+            yield return null;
+        }
+
+        limitTimerRoutine = null;
+
+        if (useTimeLimit && remainingTime <= 0f)
+        {
+            if (!objectivesComplete)
+            {
+                TriggerLoseState();
+            }
+            else
+            {
+                TriggerWinState();
+            }
+        }
+    }
+
+    private void StopLimitTimer()
+    {
+        if (limitTimerRoutine != null)
+        {
+            StopCoroutine(limitTimerRoutine);
+            limitTimerRoutine = null;
+        }
+    }
+
+    private void ConsumeMoveIfNeeded()
+    {
+        if (!useMoveLimit || maxMoves <= 0)
+        {
+            return;
+        }
+
+        remainingMoves = Mathf.Max(0, remainingMoves - 1);
+        MovesChanged?.Invoke(remainingMoves, maxMoves);
+
+        if (remainingMoves > 0)
+        {
+            return;
+        }
+
+        if (!objectivesComplete)
+        {
+            TriggerLoseState();
+        }
+        else if (!useTimeLimit)
+        {
+            TriggerWinState();
+        }
+    }
+
+    public void SetObjectivesPending(bool pending)
+    {
+        objectivesComplete = !pending;
+    }
+
+    public void ReportObjectivesCompletion()
+    {
+        objectivesComplete = true;
+        TriggerWinState();
+    }
+
+    public void TriggerWinState()
+    {
+        if (_state == GameState.Win)
+        {
+            return;
+        }
+
+        ChangeState(GameState.Win);
+    }
+
+    public void TriggerLoseState()
+    {
+        if (_state == GameState.Lose)
+        {
+            return;
+        }
+
+        ChangeState(GameState.Lose);
     }
 
     private void BuildGameModeConfigLookup()

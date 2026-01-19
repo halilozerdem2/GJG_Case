@@ -31,6 +31,8 @@ public class AudioManager : MonoBehaviour
     [SerializeField] private AudioClip powerShuffleClip;
     [SerializeField] private AudioClip destroyAllClip;
     [SerializeField] private AudioClip destroySpecificClip;
+    [SerializeField] private AudioClip winClip;
+    [SerializeField] private AudioClip loseClip;
 
     private readonly Dictionary<int, AudioClip> clipLookup = new Dictionary<int, AudioClip>();
     private readonly Dictionary<string, SceneMusicEntry> sceneMusicLookup = new Dictionary<string, SceneMusicEntry>(StringComparer.Ordinal);
@@ -111,6 +113,21 @@ public class AudioManager : MonoBehaviour
         PlayOneShot(destroySpecificClip);
     }
 
+    public void PlayCustomSfx(AudioClip clip)
+    {
+        PlayOneShot(clip);
+    }
+
+    public void PlayWin()
+    {
+        PlayOneShot(winClip);
+    }
+
+    public void PlayLose()
+    {
+        PlayOneShot(loseClip);
+    }
+
     public void SetMusicEnabled(bool enabled)
     {
         musicEnabled = enabled;
@@ -141,6 +158,9 @@ public class AudioManager : MonoBehaviour
 
     public bool IsMusicEnabled => musicEnabled;
     public bool IsSfxEnabled => sfxEnabled;
+    public AudioSource SfxSource => sfxSource;
+    public AudioClip WinClip => winClip;
+    public AudioClip LoseClip => loseClip;
 
     public void PlaySceneMusic(string sceneName)
     {

@@ -8,6 +8,10 @@ using Random = UnityEngine.Random;
 
 public class BlockManager : MonoBehaviour
 {
+    public event Action<StaticBlock> StaticBlockSpawned;
+    public event Action<int, Vector3> StaticBlockCollected;
+    public event Action<int, int, int> StaticTargetProgressChanged;
+
     [SerializeField] private BoardSettings boardSettings;
     [SerializeField] private GridManager gridManager;
     [SerializeField] private ObjectPool blockPool;
@@ -18,6 +22,7 @@ public class BlockManager : MonoBehaviour
     [SerializeField] private Vector3 invalidGroupShakeStrength = new Vector3(0.1f, 0.1f, 0f);
     [SerializeField, Range(0f, 1f)] private float shuffleScaleDipRatio = 0.4f;
     [SerializeField] private float shuffleScaleDipAmount = 0.9f;
+    [SerializeField] private List<SpecialActivationEffectEntry> specialActivationEffects = new List<SpecialActivationEffectEntry>();
 
     private static readonly ProfilerMarker FallingMarker = new ProfilerMarker("BlockManager.ResolveFalling");
     private static readonly ProfilerMarker SpawnBlocksMarker = new ProfilerMarker("BlockManager.SpawnBlocks");
@@ -37,6 +42,7 @@ public class BlockManager : MonoBehaviour
     private readonly List<BlockAnimation> activeAnimations = new List<BlockAnimation>(128);
     private readonly List<Block> poolPrefabsBuffer = new List<Block>(32);
     private readonly List<Node> shuffleNodesBuffer = new List<Node>(64);
+    private readonly List<Node> staticPlacementSlots = new List<Node>(64);
     private readonly List<Node>[] shuffleColorBuckets = new List<Node>[MaxColorIds];
     private readonly bool[] shuffleColorUsage = new bool[MaxColorIds];
     private readonly int[] usedColorIds = new int[MaxColorIds];
@@ -46,6 +52,14 @@ public class BlockManager : MonoBehaviour
     private readonly HashSet<int> processedClearIndices = new HashSet<int>();
     private readonly Stack<int[]> chainBufferPool = new Stack<int[]>();
     private readonly List<SpecialClearEntry> pendingSpecialClears = new List<SpecialClearEntry>(8);
+    private readonly HashSet<int> staticTargetIndices = new HashSet<int>();
+    private readonly HashSet<int> pendingStaticRemovalIndices = new HashSet<int>();
+    private readonly HashSet<int> staticPlacementIndexLookup = new HashSet<int>();
+    private readonly Dictionary<int, StaticTargetInfo> staticTargetInfos = new Dictionary<int, StaticTargetInfo>();
+    private readonly List<int> staticTargetKeyBuffer = new List<int>(8);
+    private readonly Dictionary<Block.BlockArchetype, Queue<ParticleSystem>> specialEffectPools = new Dictionary<Block.BlockArchetype, Queue<ParticleSystem>>();
+    private readonly Dictionary<Block.BlockArchetype, ParticleSystem> specialEffectPrefabs = new Dictionary<Block.BlockArchetype, ParticleSystem>();
+    private readonly Dictionary<int, ParticleSystem> staticBlastPrefabs = new Dictionary<int, ParticleSystem>();
     private BoardModel boardModel = new BoardModel();
     private int[] bfsQueue;
     private int[] groupIndicesBuffer;
@@ -66,12 +80,30 @@ public class BlockManager : MonoBehaviour
     private bool shuffleResolutionPending;
     private Action<bool> shuffleCompletionCallback;
     private bool[] shuffleLockedFlags;
+    private bool specialEffectLookupInitialized;
+    private bool staticTargetsSpawned;
+    private int totalStaticTargetCount;
 
     private BoardSettings Settings => boardSettings != null ? boardSettings : gridManager?.BoardSettings;
     private AudioManager Audio => audioManager != null ? audioManager : AudioManager.Instance;
 
     public bool HasValidMove => isValidMoveExist;
     public BoardModel BoardModel => boardModel;
+    public int TotalStaticTargetCount => totalStaticTargetCount;
+    public int RemainingStaticTargetCount => staticTargetIndices.Count;
+    public bool TryGetStaticTargetProgress(int blockType, out int collected, out int total)
+    {
+        if (staticTargetInfos.TryGetValue(blockType, out StaticTargetInfo info))
+        {
+            total = info.Total;
+            collected = info.Total - info.Remaining;
+            return true;
+        }
+
+        collected = 0;
+        total = 0;
+        return false;
+    }
 
     private void OnEnable()
     {
@@ -95,6 +127,12 @@ public class BlockManager : MonoBehaviour
     public void Initialize(GridManager grid)
     {
         gridManager = grid != null ? grid : gridManager;
+        specialEffectLookupInitialized = false;
+        staticTargetIndices.Clear();
+        pendingStaticRemovalIndices.Clear();
+        staticTargetsSpawned = false;
+        totalStaticTargetCount = 0;
+        ResetStaticTargetData();
         ConfigureBoardModel();
         EnsureGroupBuffers();
         isValidMoveExist = false;
@@ -130,7 +168,6 @@ public class BlockManager : MonoBehaviour
             bool activated = TryExecuteSpecialBlock(block);
             if (activated)
             {
-                Audio?.PlayBlockSfx(block.blockType);
                 return true;
             }
 
@@ -172,7 +209,7 @@ public class BlockManager : MonoBehaviour
         GroupContext groupContext = new GroupContext(block, groupIndicesBuffer, groupCount, block.blockType);
         Audio?.PlayBlockSfx(block.blockType);
 
-        return ExecuteBlast(groupContext, originNode, true, false);
+        return ExecuteBlast(groupContext, originNode, true, false, true);
     }
 
     private bool TryExecuteSpecialBlock(Block block)
@@ -189,10 +226,10 @@ public class BlockManager : MonoBehaviour
         }
 
         GroupContext context = new GroupContext(block, groupIndicesBuffer, count, block.blockType);
-        return ExecuteBlast(context, null, false, true);
+        return ExecuteBlast(context, null, false, true, false);
     }
 
-    private bool ExecuteBlast(in GroupContext context, Node originNode, bool allowSpecialSpawn, bool activateSpecial)
+    private bool ExecuteBlast(in GroupContext context, Node originNode, bool allowSpecialSpawn, bool activateSpecial, bool allowStaticAdjacency)
     {
         if (!context.IsValid || gridManager == null)
         {
@@ -212,7 +249,7 @@ public class BlockManager : MonoBehaviour
         }
 
         origin?.HandleBlastResult(context);
-        bool cleared = ClearBlocksForContext(context, nodeGrid);
+        bool cleared = ClearBlocksForContext(context, nodeGrid, allowStaticAdjacency);
 
         if (cleared && allowSpecialSpawn)
         {
@@ -222,7 +259,7 @@ public class BlockManager : MonoBehaviour
         return cleared;
     }
 
-    private bool ClearBlocksForContext(GroupContext context, Node[,] nodeGrid)
+    private bool ClearBlocksForContext(GroupContext context, Node[,] nodeGrid, bool allowStaticAdjacency)
     {
         if (boardModel == null || nodeGrid == null || context.Indices == null)
         {
@@ -241,7 +278,7 @@ public class BlockManager : MonoBehaviour
         pendingChainGroups.Clear();
 
         int limit = Mathf.Min(context.GroupSize, context.Indices.Length);
-        EnqueueChainGroup(context.Indices, limit);
+        EnqueueChainGroup(context.Indices, limit, allowStaticAdjacency);
 
         while (pendingChainGroups.Count > 0)
         {
@@ -268,7 +305,7 @@ public class BlockManager : MonoBehaviour
 
                 Node targetNode = nodeGrid[x, y];
                 Block member = targetNode != null ? targetNode.OccupiedBlock : null;
-                if (member == null || !member.IsSpecialVariant)
+                if (member == null || !member.IsSpecialVariant || member.Archetype == Block.BlockArchetype.Static)
                 {
                     continue;
                 }
@@ -284,7 +321,8 @@ public class BlockManager : MonoBehaviour
                     continue;
                 }
 
-                EnqueueChainGroup(specialSearch.ResultBuffer, specialCount);
+                TriggerSpecialActivationFeedback(member);
+                EnqueueChainGroup(specialSearch.ResultBuffer, specialCount, false);
             }
 
             // Phase 2: clear current group's regular blocks first.
@@ -344,6 +382,12 @@ public class BlockManager : MonoBehaviour
                 Node targetNode = entry.Node;
                 Block special = entry.Block;
 
+                if (special is StaticBlock)
+                {
+                    RemoveStaticBlockAt(entry.ModelIndex);
+                    continue;
+                }
+
                 if (targetNode != null && targetNode.OccupiedBlock == special)
                 {
                     targetNode.OccupiedBlock = null;
@@ -363,6 +407,10 @@ public class BlockManager : MonoBehaviour
                 ClearModelCell(entry.ModelIndex);
             }
 
+            if (group.AllowStaticAdjacent)
+            {
+                CollectAdjacentStaticBlocks(indices, groupCount);
+            }
             ReleaseChainBuffer(indices);
         }
 
@@ -490,7 +538,7 @@ public class BlockManager : MonoBehaviour
         return true;
     }
 
-    private void EnqueueChainGroup(int[] source, int count)
+    private void EnqueueChainGroup(int[] source, int count, bool allowStaticAdjacent)
     {
         if (source == null || count <= 0 || boardModel == null)
         {
@@ -520,7 +568,8 @@ public class BlockManager : MonoBehaviour
             pendingChainGroups.Enqueue(new ChainClearGroup
             {
                 Indices = buffer,
-                Count = accepted
+                Count = accepted,
+                AllowStaticAdjacent = allowStaticAdjacent
             });
         }
         else
@@ -577,6 +626,7 @@ public class BlockManager : MonoBehaviour
 
             for (int x = 0; x < settings.Columns; x++)
             {
+                int segmentStart = 0;
                 int writeIndex = 0;
                 for (int y = 0; y < settings.Rows; y++)
                 {
@@ -597,6 +647,15 @@ public class BlockManager : MonoBehaviour
                     if (block == null)
                     {
                         ClearModelCell(fromIndex);
+                        continue;
+                    }
+
+                    if (block is StaticBlock)
+                    {
+                        FinalizeColumnSegment(x, segmentStart, writeIndex, y);
+                        segmentStart = y + 1;
+                        writeIndex = segmentStart;
+                        SetModelCell(fromIndex, block.blockType);
                         continue;
                     }
 
@@ -621,15 +680,7 @@ public class BlockManager : MonoBehaviour
                     writeIndex++;
                 }
 
-                for (int y = writeIndex; y < settings.Rows; y++)
-                {
-                    int emptyIndex = boardModel.Index(x, y);
-                    if (emptyIndex >= 0)
-                    {
-                        ClearModelCell(emptyIndex);
-                        pendingSpawnIndices.Add(emptyIndex);
-                    }
-                }
+                FinalizeColumnSegment(x, segmentStart, writeIndex, settings.Rows);
             }
 
             float dropDuration = Mathf.Max(0f, blockDropDuration);
@@ -716,6 +767,12 @@ public class BlockManager : MonoBehaviour
                 }
 
                 Block occupiedBlock = node.OccupiedBlock;
+                if (occupiedBlock is StaticBlock)
+                {
+                    SetModelCell(node.gridPosition, occupiedBlock.blockType);
+                    continue;
+                }
+
                 if (occupiedBlock != null)
                 {
                     occupiedBlock.node = null; // prevent SetBlock from clearing a reused node later
@@ -756,6 +813,11 @@ public class BlockManager : MonoBehaviour
             {
                 Node node = nodeGrid[x, y];
                 if (node == null)
+                {
+                    continue;
+                }
+
+                if (node.OccupiedBlock != null)
                 {
                     continue;
                 }
@@ -816,6 +878,15 @@ public class BlockManager : MonoBehaviour
                 continue;
             }
 
+            if (block is StaticBlock)
+            {
+                if (TryRemoveStaticBlock(node))
+                {
+                    anyDestroyed = true;
+                }
+                continue;
+            }
+
             PlayBlockBlastEffect(block);
             ReleaseBlock(block);
             node.OccupiedBlock = null;
@@ -851,6 +922,15 @@ public class BlockManager : MonoBehaviour
             Block block = node?.OccupiedBlock;
             if (block == null || block.blockType != targetBlockType)
             {
+                continue;
+            }
+
+            if (block is StaticBlock)
+            {
+                if (TryRemoveStaticBlock(node))
+                {
+                    destroyedAny = true;
+                }
                 continue;
             }
 
@@ -933,6 +1013,8 @@ public class BlockManager : MonoBehaviour
                 AnimateBlockToNode(randomBlock, node, dropDuration, AnimationEase.OutBounce);
             }
 
+            SpawnStaticTargetsIfNeeded();
+
             pendingSpawnIndices.Clear();
             gridManager.UpdateFreeNodes();
             RefreshGroupVisuals();
@@ -960,6 +1042,36 @@ public class BlockManager : MonoBehaviour
         Block[] pooledPrefabs = BuildPoolPrefabArray(settings);
         blockPool.Initialize(pooledPrefabs, totalCells, 1.2f);
         blockPool.InitializeEffects(settings.BlockPrefabs, settings.BlastEffectPrefabs);
+        BuildStaticBlastLookup();
+    }
+
+    private void BuildStaticBlastLookup()
+    {
+        staticBlastPrefabs.Clear();
+        GameManager manager = GameManager.Instance;
+        var config = manager != null ? manager.ActiveGameModeConfig : null;
+        if (config == null)
+        {
+            return;
+        }
+
+        var staticSpawns = config.StaticTargetSpawns;
+        for (int i = 0; i < staticSpawns.Count; i++)
+        {
+            StaticBlock prefab = staticSpawns[i].TargetPrefab as StaticBlock;
+            if (prefab == null)
+            {
+                continue;
+            }
+
+            ParticleSystem fx = prefab.StaticBlastEffect;
+            if (fx == null || staticBlastPrefabs.ContainsKey(prefab.blockType))
+            {
+                continue;
+            }
+
+            staticBlastPrefabs[prefab.blockType] = fx;
+        }
     }
 
     private Block[] BuildPoolPrefabArray(BoardSettings settings)
@@ -988,6 +1100,16 @@ public class BlockManager : MonoBehaviour
                 if (extraPrefab != null)
                 {
                     poolPrefabsBuffer.Add(extraPrefab);
+                }
+            }
+
+            var staticPrefabs = config.StaticTargetSpawns;
+            for (int i = 0; i < staticPrefabs.Count; i++)
+            {
+                Block targetPrefab = staticPrefabs[i].TargetPrefab;
+                if (targetPrefab != null)
+                {
+                    poolPrefabsBuffer.Add(targetPrefab);
                 }
             }
         }
@@ -1162,6 +1284,73 @@ public class BlockManager : MonoBehaviour
         StartCoroutine(ReturnEffectToPool(effect));
     }
 
+    private void PlayStaticBlockEffect(StaticBlock block)
+    {
+        if (block == null)
+        {
+            return;
+        }
+
+        if (staticBlastPrefabs.TryGetValue(block.blockType, out ParticleSystem prefab) && prefab != null)
+        {
+            ParticleSystem instance = Instantiate(prefab, GetBlastEffectRoot());
+            Transform t = instance.transform;
+            t.position = block.transform.position;
+            t.rotation = Quaternion.identity;
+            instance.Play(true);
+            StartCoroutine(ReturnStaticEffect(instance));
+        }
+        else
+        {
+            PlayBlockBlastEffect(block);
+        }
+    }
+
+    private IEnumerator ReturnStaticEffect(ParticleSystem effect)
+    {
+        if (effect == null)
+        {
+            yield break;
+        }
+
+        while (effect.IsAlive(true))
+        {
+            yield return null;
+        }
+
+        Destroy(effect.gameObject);
+    }
+
+    private void RegisterStaticTarget(int blockType)
+    {
+        if (!staticTargetInfos.TryGetValue(blockType, out StaticTargetInfo info))
+        {
+            info = new StaticTargetInfo();
+        }
+
+        info.Total++;
+        info.Remaining++;
+        staticTargetInfos[blockType] = info;
+        NotifyStaticTargetProgress(blockType, info);
+    }
+
+    private void UnregisterStaticTarget(int blockType)
+    {
+        if (!staticTargetInfos.TryGetValue(blockType, out StaticTargetInfo info))
+        {
+            return;
+        }
+
+        info.Remaining = Mathf.Max(0, info.Remaining - 1);
+        staticTargetInfos[blockType] = info;
+        NotifyStaticTargetProgress(blockType, info);
+    }
+
+    private void NotifyStaticTargetProgress(int blockType, StaticTargetInfo info)
+    {
+        StaticTargetProgressChanged?.Invoke(blockType, info.Total - info.Remaining, info.Total);
+    }
+
     private IEnumerator ReturnEffectToPool(ParticleSystem effect)
     {
         if (effect == null)
@@ -1175,6 +1364,117 @@ public class BlockManager : MonoBehaviour
         }
 
         blockPool?.ReleaseBlastEffect(effect);
+    }
+
+    private void TriggerSpecialActivationFeedback(Block block)
+    {
+        if (block == null || !block.IsSpecialVariant || block.Archetype == Block.BlockArchetype.Static)
+        {
+            return;
+        }
+
+        Audio?.PlayBlockSfx(block.blockType);
+        PlaySpecialActivationEffect(block);
+    }
+
+    private void PlaySpecialActivationEffect(Block block)
+    {
+        if (block == null)
+        {
+            return;
+        }
+
+        EnsureSpecialEffectLookup();
+        if (!specialEffectPrefabs.TryGetValue(block.Archetype, out ParticleSystem prefab) || prefab == null)
+        {
+            return;
+        }
+
+        ParticleSystem effect = AcquireSpecialEffect(block.Archetype, prefab);
+        if (effect == null)
+        {
+            return;
+        }
+
+        Transform effectRoot = GetBlastEffectRoot();
+        Transform effectTransform = effect.transform;
+        effectTransform.SetParent(effectRoot, false);
+        effectTransform.position = block.transform.position;
+        effectTransform.rotation = Quaternion.identity;
+        effect.gameObject.SetActive(true);
+        effect.Play(true);
+        StartCoroutine(ReturnSpecialEffect(block.Archetype, effect));
+    }
+
+    private void EnsureSpecialEffectLookup()
+    {
+        if (specialEffectLookupInitialized)
+        {
+            return;
+        }
+
+        specialEffectPrefabs.Clear();
+        if (specialActivationEffects != null)
+        {
+            for (int i = 0; i < specialActivationEffects.Count; i++)
+            {
+                SpecialActivationEffectEntry entry = specialActivationEffects[i];
+                if (entry.effectPrefab == null)
+                {
+                    continue;
+                }
+
+                if (specialEffectPrefabs.ContainsKey(entry.archetype))
+                {
+                    continue;
+                }
+
+                specialEffectPrefabs[entry.archetype] = entry.effectPrefab;
+            }
+        }
+
+        specialEffectLookupInitialized = true;
+    }
+
+    private ParticleSystem AcquireSpecialEffect(Block.BlockArchetype archetype, ParticleSystem prefab)
+    {
+        if (prefab == null)
+        {
+            return null;
+        }
+
+        if (!specialEffectPools.TryGetValue(archetype, out Queue<ParticleSystem> pool))
+        {
+            pool = new Queue<ParticleSystem>();
+            specialEffectPools[archetype] = pool;
+        }
+
+        ParticleSystem effect = pool.Count > 0 ? pool.Dequeue() : Instantiate(prefab, GetBlastEffectRoot());
+        return effect;
+    }
+
+    private IEnumerator ReturnSpecialEffect(Block.BlockArchetype archetype, ParticleSystem effect)
+    {
+        if (effect == null)
+        {
+            yield break;
+        }
+
+        while (effect.IsAlive(true))
+        {
+            yield return null;
+        }
+
+        effect.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
+        effect.gameObject.SetActive(false);
+
+        if (!specialEffectPools.TryGetValue(archetype, out Queue<ParticleSystem> pool))
+        {
+            pool = new Queue<ParticleSystem>();
+            specialEffectPools[archetype] = pool;
+        }
+
+        pool.Enqueue(effect);
     }
 
     private void PlayInvalidGroupFeedback(int groupCount)
@@ -1348,17 +1648,19 @@ public class BlockManager : MonoBehaviour
 
             EnsureShuffleBuffers(totalNodes);
             ResetShuffleLocks(totalNodes);
+            LockStaticNodes();
             ResetColorBuckets();
             shuffleNodesBuffer.Clear();
 
             foreach (Node node in nodeGrid)
             {
-                if (node?.OccupiedBlock == null)
+                Block occupant = node?.OccupiedBlock;
+                if (occupant == null || occupant is StaticBlock)
                 {
                     continue;
                 }
 
-                int colorId = ToColorId(node.OccupiedBlock.blockType);
+                int colorId = ToColorId(occupant.blockType);
                 GetColorBucket(colorId).Add(node);
             }
 
@@ -1407,7 +1709,7 @@ public class BlockManager : MonoBehaviour
 
             foreach (Node node in nodeGrid)
             {
-                if (node?.OccupiedBlock == null || IsNodeLocked(node))
+                if (node?.OccupiedBlock == null || node.OccupiedBlock is StaticBlock || IsNodeLocked(node))
                 {
                     continue;
                 }
@@ -1511,6 +1813,11 @@ public class BlockManager : MonoBehaviour
             return;
         }
 
+        if (IsStaticNode(nodeA) || IsStaticNode(nodeB))
+        {
+            return;
+        }
+
         List<Node> nodesOfColor = color >= 0 && color < shuffleColorBuckets.Length
             ? shuffleColorBuckets[color]
             : null;
@@ -1560,6 +1867,20 @@ public class BlockManager : MonoBehaviour
 
         int length = Mathf.Min(totalNodes, shuffleLockedFlags.Length);
         Array.Clear(shuffleLockedFlags, 0, length);
+    }
+
+    private void LockStaticNodes()
+    {
+        if (staticTargetIndices.Count == 0)
+        {
+            return;
+        }
+
+        foreach (int index in staticTargetIndices)
+        {
+            Node node = GetNodeFromIndex(index);
+            LockNode(node);
+        }
     }
 
     private void ResetColorBuckets()
@@ -1622,9 +1943,19 @@ public class BlockManager : MonoBehaviour
         return index >= 0 && index < shuffleLockedFlags.Length && shuffleLockedFlags[index];
     }
 
+    private static bool IsStaticNode(Node node)
+    {
+        return node != null && node.OccupiedBlock is StaticBlock;
+    }
+
     private void SwapNodeBlock(Node source, Node destination)
     {
         if (source == null || destination == null || source == destination)
+        {
+            return;
+        }
+
+        if (IsStaticNode(source) || IsStaticNode(destination))
         {
             return;
         }
@@ -1695,29 +2026,53 @@ public class BlockManager : MonoBehaviour
         foreach (Node node in nodeGrid)
         {
             Block block = node?.OccupiedBlock;
-            if (block == null)
+            if (block == null || block is StaticBlock)
             {
                 continue;
             }
 
             ReleaseBlock(block);
             node.OccupiedBlock = null;
+            ClearModelCell(node.gridPosition);
         }
 
-        boardModel?.Clear();
         RequireFullBoardRefresh();
         gridManager.UpdateFreeNodes();
 
-        Vector2Int forcedPairA = new Vector2Int(0, 0);
-        Vector2Int forcedPairB = columns > 1 ? new Vector2Int(1, 0) : new Vector2Int(0, 1);
         Block forcedPrefab = prefabs[Random.Range(0, prefabs.Length)];
         if (forcedPrefab == null)
         {
             return false;
         }
 
-        Node forcedNodeA = nodeGrid[forcedPairA.x, forcedPairA.y];
-        Node forcedNodeB = nodeGrid[forcedPairB.x, forcedPairB.y];
+        Node forcedNodeA = null;
+        Node forcedNodeB = null;
+        for (int y = 0; y < rows && (forcedNodeA == null || forcedNodeB == null); y++)
+        {
+            for (int x = 0; x < columns && (forcedNodeA == null || forcedNodeB == null); x++)
+            {
+                Node node = nodeGrid[x, y];
+                if (node == null || IsStaticNode(node))
+                {
+                    continue;
+                }
+
+                if (forcedNodeA == null)
+                {
+                    forcedNodeA = node;
+                }
+                else if (forcedNodeB == null)
+                {
+                    forcedNodeB = node;
+                }
+            }
+        }
+
+        if (forcedNodeA == null || forcedNodeB == null)
+        {
+            return false;
+        }
+
         SpawnBlockOfType(forcedPrefab.blockType, forcedNodeA);
         SpawnBlockOfType(forcedPrefab.blockType, forcedNodeB);
 
@@ -1767,6 +2122,302 @@ public class BlockManager : MonoBehaviour
             AnimateSpecialSpawn(spawned);
         }
         return spawned;
+    }
+
+    private void SpawnStaticTargetsIfNeeded()
+    {
+        if (staticTargetsSpawned)
+        {
+            return;
+        }
+
+        staticTargetsSpawned = true;
+
+        GameManager manager = GameManager.Instance;
+        if (manager == null)
+        {
+            return;
+        }
+
+        var staticEntries = manager.ActiveStaticTargetSpawns;
+        if (staticEntries == null || staticEntries.Count == 0)
+        {
+            return;
+        }
+
+        staticPlacementIndexLookup.Clear();
+
+        Node[,] nodeGrid = gridManager?.NodeGrid;
+        if (nodeGrid == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < staticEntries.Count; i++)
+        {
+            GameModeConfig.StaticTargetSpawn entry = staticEntries[i];
+            if (!(entry.TargetPrefab is StaticBlock staticPrefab))
+            {
+                if (entry.TargetPrefab != null)
+                {
+                    Debug.LogWarning($"Static target spawn {entry.TargetPrefab.name} is not configured as StaticBlock.");
+                }
+                continue;
+            }
+
+            BuildStaticPlacementSlots(entry.PlacementMask, staticPlacementSlots);
+            if (staticPlacementSlots.Count == 0)
+            {
+                continue;
+            }
+
+            for (int slot = 0; slot < staticPlacementSlots.Count; slot++)
+            {
+                ReplaceNodeWithStatic(staticPlacementSlots[slot], staticPrefab);
+            }
+
+            staticPlacementSlots.Clear();
+        }
+    }
+
+    private void ReplaceNodeWithStatic(Node node, StaticBlock prefab)
+    {
+        if (node == null || prefab == null)
+        {
+            return;
+        }
+
+        Block current = node.OccupiedBlock;
+        if (current != null)
+        {
+            node.OccupiedBlock = null;
+            ReleaseBlock(current);
+        }
+
+        StaticBlock spawned = SpawnStaticBlockInstance(prefab, node);
+        if (spawned == null)
+        {
+            return;
+        }
+
+        int index = boardModel.Index(node.gridPosition.x, node.gridPosition.y);
+        if (index >= 0)
+        {
+            staticTargetIndices.Add(index);
+        }
+
+        totalStaticTargetCount++;
+        RegisterStaticTarget(prefab.blockType);
+
+        StaticBlockSpawned?.Invoke(spawned);
+    }
+
+    private StaticBlock SpawnStaticBlockInstance(StaticBlock prefab, Node node)
+    {
+        if (prefab == null || node == null)
+        {
+            return null;
+        }
+
+        Block.BlockArchetype archetype = prefab.Archetype;
+        Block spawned = SpawnBlockFromPool(prefab.blockType, node.transform, archetype);
+        if (!(spawned is StaticBlock staticBlock))
+        {
+            Debug.LogWarning($"Prefab {prefab.name} is not configured as a StaticBlock.");
+            if (spawned != null)
+            {
+                ReleaseBlock(spawned);
+            }
+            return null;
+        }
+
+        staticBlock.SetBlock(node);
+        SnapBlockToNode(staticBlock, node);
+        SetModelCell(node.gridPosition, prefab.blockType);
+        gridManager?.FreeNodes.Remove(node);
+        return staticBlock;
+    }
+
+    private void BuildStaticPlacementSlots(GameModeConfig.StaticPlacementMask mask, List<Node> results)
+    {
+        results.Clear();
+
+        Node[,] nodeGrid = gridManager?.NodeGrid;
+        if (nodeGrid == null || boardModel == null)
+        {
+            return;
+        }
+
+        int columns = boardModel.Columns;
+        int rows = boardModel.Rows;
+        if (columns <= 0 || rows <= 0)
+        {
+            return;
+        }
+
+        void TryAdd(int x, int y)
+        {
+            if (x < 0 || y < 0 || x >= columns || y >= rows)
+            {
+                return;
+            }
+
+            int index = boardModel.Index(x, y);
+            if (index < 0 || staticTargetIndices.Contains(index) || !staticPlacementIndexLookup.Add(index))
+            {
+                return;
+            }
+
+            Node node = nodeGrid[x, y];
+            if (node == null)
+            {
+                return;
+            }
+
+            Block occupant = node.OccupiedBlock;
+            if (occupant == null || occupant is StaticBlock)
+            {
+                return;
+            }
+
+            results.Add(node);
+        }
+
+        var custom = mask.CustomCells;
+        if (custom == null || custom.Length == 0)
+        {
+            return;
+        }
+
+        int max = Mathf.Min(custom.Length, columns * rows);
+        for (int idx = 0; idx < max; idx++)
+        {
+            if (!custom[idx])
+            {
+                continue;
+            }
+
+            int y = idx / columns;
+            int x = idx % columns;
+            TryAdd(x, y);
+        }
+    }
+
+    private void CollectAdjacentStaticBlocks(int[] indices, int count)
+    {
+        if (boardModel == null || gridManager == null || indices == null || count <= 0)
+        {
+            return;
+        }
+
+        if (staticTargetIndices.Count == 0)
+        {
+            return;
+        }
+
+        pendingStaticRemovalIndices.Clear();
+        int columns = boardModel.Columns;
+        int rows = boardModel.Rows;
+
+        for (int i = 0; i < count; i++)
+        {
+            if (i >= indices.Length)
+            {
+                break;
+            }
+
+            int index = indices[i];
+            if (!boardModel.IsValidIndex(index))
+            {
+                continue;
+            }
+
+            int x = columns > 0 ? index % columns : boardModel.X(index);
+            int y = columns > 0 ? index / columns : boardModel.Y(index);
+            if (x < 0 || y < 0 || x >= columns || y >= rows)
+            {
+                continue;
+            }
+
+            QueueStaticNeighbour(x - 1, y);
+            QueueStaticNeighbour(x + 1, y);
+            QueueStaticNeighbour(x, y - 1);
+            QueueStaticNeighbour(x, y + 1);
+        }
+
+        if (pendingStaticRemovalIndices.Count == 0)
+        {
+            return;
+        }
+
+        foreach (int staticIndex in pendingStaticRemovalIndices)
+        {
+            RemoveStaticBlockAt(staticIndex);
+        }
+
+        pendingStaticRemovalIndices.Clear();
+    }
+
+    private void QueueStaticNeighbour(int x, int y)
+    {
+        if (boardModel == null)
+        {
+            return;
+        }
+
+        int index = boardModel.Index(x, y);
+        if (index < 0 || !staticTargetIndices.Contains(index))
+        {
+            return;
+        }
+
+        pendingStaticRemovalIndices.Add(index);
+    }
+
+    private bool TryRemoveStaticBlock(Node node)
+    {
+        if (node == null)
+        {
+            return false;
+        }
+
+        int index = boardModel.Index(node.gridPosition.x, node.gridPosition.y);
+        if (index < 0 || !staticTargetIndices.Contains(index))
+        {
+            return false;
+        }
+
+        RemoveStaticBlockAt(index);
+        return true;
+    }
+
+    private void RemoveStaticBlockAt(int index)
+    {
+        if (!staticTargetIndices.Contains(index))
+        {
+            return;
+        }
+
+        Node node = GetNodeFromIndex(index);
+        StaticBlock staticBlock = node?.OccupiedBlock as StaticBlock;
+
+        if (node != null && staticBlock != null)
+        {
+            if (node.OccupiedBlock == staticBlock)
+            {
+                node.OccupiedBlock = null;
+                gridManager?.FreeNodes.Add(node);
+            }
+
+            Vector3 worldPosition = staticBlock.transform.position;
+            PlayStaticBlockEffect(staticBlock);
+            ReleaseBlock(staticBlock);
+            UnregisterStaticTarget(staticBlock.blockType);
+            StaticBlockCollected?.Invoke(staticBlock.blockType, worldPosition);
+        }
+
+        ClearModelCell(index);
+        staticTargetIndices.Remove(index);
     }
 
     private void AnimateSpecialSpawn(Block block)
@@ -2027,6 +2678,50 @@ public class BlockManager : MonoBehaviour
         }
     }
 
+    private void ResetStaticTargetData()
+    {
+        if (staticTargetInfos.Count == 0)
+        {
+            return;
+        }
+
+        staticTargetKeyBuffer.Clear();
+        foreach (var key in staticTargetInfos.Keys)
+        {
+            staticTargetKeyBuffer.Add(key);
+        }
+
+        staticTargetInfos.Clear();
+
+        for (int i = 0; i < staticTargetKeyBuffer.Count; i++)
+        {
+            StaticTargetProgressChanged?.Invoke(staticTargetKeyBuffer[i], 0, 0);
+        }
+
+        staticTargetKeyBuffer.Clear();
+    }
+
+    private void FinalizeColumnSegment(int column, int segmentStart, int writeIndex, int segmentEnd)
+    {
+        if (boardModel == null)
+        {
+            return;
+        }
+
+        int clampedWrite = Mathf.Clamp(writeIndex, segmentStart, segmentEnd);
+        for (int y = clampedWrite; y < segmentEnd; y++)
+        {
+            int index = boardModel.Index(column, y);
+            if (index < 0 || staticTargetIndices.Contains(index))
+            {
+                continue;
+            }
+
+            ClearModelCell(index);
+            pendingSpawnIndices.Add(index);
+        }
+    }
+
     private void ConfigureBoardModel()
     {
         boardModel ??= new BoardModel();
@@ -2081,7 +2776,7 @@ public class BlockManager : MonoBehaviour
             for (int y = 0; y < rows; y++)
             {
                 int index = boardModel.Index(x, y);
-                if (index >= 0)
+                if (index >= 0 && !staticTargetIndices.Contains(index))
                 {
                     pendingSpawnIndices.Add(index);
                 }
@@ -2373,6 +3068,13 @@ public class BlockManager : MonoBehaviour
                         continue;
                     }
 
+                    Node node = GetNodeFromIndex(index);
+                    Block block = node?.OccupiedBlock;
+                    if (block == null || !block.CanParticipateInGroup)
+                    {
+                        continue;
+                    }
+
                     byte color = cell.colorId;
                     int rightIndex = boardModel.Index(x + 1, y);
                     if (rightIndex >= 0)
@@ -2380,7 +3082,12 @@ public class BlockManager : MonoBehaviour
                         Cell rightCell = boardModel.GetCell(rightIndex);
                         if (rightCell.occupied && rightCell.colorId == color)
                         {
-                            return true;
+                            Node rightNode = GetNodeFromIndex(rightIndex);
+                            Block rightBlock = rightNode?.OccupiedBlock;
+                            if (rightBlock != null && rightBlock.CanParticipateInGroup)
+                            {
+                                return true;
+                            }
                         }
                     }
 
@@ -2390,7 +3097,12 @@ public class BlockManager : MonoBehaviour
                         Cell upCell = boardModel.GetCell(upIndex);
                         if (upCell.occupied && upCell.colorId == color)
                         {
-                            return true;
+                            Node upNode = GetNodeFromIndex(upIndex);
+                            Block upBlock = upNode?.OccupiedBlock;
+                            if (upBlock != null && upBlock.CanParticipateInGroup)
+                            {
+                                return true;
+                            }
                         }
                     }
                 }
@@ -2494,6 +3206,13 @@ public class BlockManager : MonoBehaviour
                 continue;
             }
 
+            Node node = GetNodeFromIndex(i);
+            Block block = node?.OccupiedBlock;
+            if (block == null || !block.CanParticipateInGroup)
+            {
+                continue;
+            }
+
             int color = cell.colorId;
             if (color < 0 || color >= MaxColorIds)
             {
@@ -2552,10 +3271,24 @@ public class BlockManager : MonoBehaviour
         return true;
     }
 
+    [Serializable]
+    private struct SpecialActivationEffectEntry
+    {
+        public Block.BlockArchetype archetype;
+        public ParticleSystem effectPrefab;
+    }
+
+    private struct StaticTargetInfo
+    {
+        public int Total;
+        public int Remaining;
+    }
+
     private struct ChainClearGroup
     {
         public int[] Indices;
         public int Count;
+        public bool AllowStaticAdjacent;
     }
 
     private struct SpecialClearEntry

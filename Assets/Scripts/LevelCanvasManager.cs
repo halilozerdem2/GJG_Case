@@ -1,5 +1,8 @@
+using System.Collections.Generic;
+using TMPro;
 using UnityEngine;
 using UnityEngine.SceneManagement;
+using UnityEngine.UI;
 
 public class LevelCanvasManager : MonoBehaviour
 {
@@ -13,6 +16,12 @@ public class LevelCanvasManager : MonoBehaviour
     [SerializeField] private ToggleSwitchAnimator musicAnimator;
     [SerializeField] private ToggleSwitchAnimator sfxAnimator;
     [SerializeField] private ToggleSwitchAnimator vibrationAnimator;
+    [Header("Powerup Cooldowns")]
+    [SerializeField] private List<PowerupButtonBinding> powerupButtons = new List<PowerupButtonBinding>();
+
+    private readonly Dictionary<PowerupType, float> powerupCooldownDurations = new Dictionary<PowerupType, float>();
+    private readonly Dictionary<PowerupType, float> powerupCooldowns = new Dictionary<PowerupType, float>();
+    private readonly List<PowerupType> cooldownUpdateKeys = new List<PowerupType>();
 
     private AudioManager Audio => audioManager != null ? audioManager : AudioManager.Instance;
     private SettingsService Service
@@ -31,6 +40,12 @@ public class LevelCanvasManager : MonoBehaviour
     private void Start()
     {
         SyncToggleStates();
+        InitializeCooldowns();
+    }
+
+    private void Update()
+    {
+        TickPowerupCooldowns(Time.deltaTime);
     }
 
     public void OnShuffleButton()
@@ -47,8 +62,15 @@ public class LevelCanvasManager : MonoBehaviour
             return;
         }
 
+        if (!IsPowerupReady(PowerupType.Shuffle))
+        {
+            Audio?.PlayInvalidSelection();
+            return;
+        }
+
         blockTypeSelectionPanel?.Hide();
         GameManager.Instance.ForceShuffleInProgress();
+        StartPowerupCooldown(PowerupType.Shuffle);
         Audio?.PlayShuffle();
         blockManager.ResolveDeadlock(HandleShuffleCompleted);
     }
@@ -67,8 +89,15 @@ public class LevelCanvasManager : MonoBehaviour
             return;
         }
 
+        if (!IsPowerupReady(PowerupType.PowerShuffle))
+        {
+            Audio?.PlayInvalidSelection();
+            return;
+        }
+
         blockTypeSelectionPanel?.Hide();
         GameManager.Instance.ForceShuffleInProgress();
+        StartPowerupCooldown(PowerupType.PowerShuffle);
         blockManager.PowerShuffle(HandlePowerShuffleCompleted);
         Audio?.PlayPowerShuffle();
     }
@@ -81,10 +110,17 @@ public class LevelCanvasManager : MonoBehaviour
             return;
         }
 
+        if (!IsPowerupReady(PowerupType.DestroyAll))
+        {
+            Audio?.PlayInvalidSelection();
+            return;
+        }
+
         blockTypeSelectionPanel?.Hide();
         bool destroyed = blockManager.DestroyAllBlocks();
         if (destroyed)
         {
+            StartPowerupCooldown(PowerupType.DestroyAll);
             Audio?.PlayDestroyAll();
             GameManager.Instance?.ForceSpawnAfterBoardClear();
         }
@@ -108,6 +144,12 @@ public class LevelCanvasManager : MonoBehaviour
         }
         else
         {
+            if (!IsPowerupReady(PowerupType.DestroySpecific))
+            {
+                Audio?.PlayInvalidSelection();
+                return;
+            }
+
             blockTypeSelectionPanel.Show(HandleDestroySpecificSelection);
         }
     }
@@ -141,6 +183,7 @@ public class LevelCanvasManager : MonoBehaviour
         bool destroyed = blockManager.DestroyBlocksOfType(blockType);
         if (destroyed)
         {
+            StartPowerupCooldown(PowerupType.DestroySpecific);
             Audio?.PlayDestroySpecific();
             GameManager.Instance?.ForceResolveAfterPowerup();
         }
@@ -225,5 +268,135 @@ public class LevelCanvasManager : MonoBehaviour
         }
 
         manager.SetGameMode(mode);
+    }
+
+    private void InitializeCooldowns()
+    {
+        powerupCooldownDurations.Clear();
+        powerupCooldowns.Clear();
+
+        var manager = GameManager.Instance;
+        var cooldownEntries = manager != null ? manager.ActivePowerupCooldowns : null;
+        if (cooldownEntries != null)
+        {
+            for (int i = 0; i < cooldownEntries.Count; i++)
+            {
+                var entry = cooldownEntries[i];
+                powerupCooldownDurations[entry.Powerup] = Mathf.Max(0f, entry.CooldownSeconds);
+            }
+        }
+
+        for (int i = 0; i < powerupButtons.Count; i++)
+        {
+            PowerupType type = powerupButtons[i].powerup;
+            EnsurePowerupEntry(type);
+            powerupCooldowns[type] = 0f;
+            UpdatePowerupVisual(type);
+        }
+    }
+
+    private void TickPowerupCooldowns(float deltaTime)
+    {
+        if (powerupCooldowns.Count == 0 || deltaTime <= 0f)
+        {
+            return;
+        }
+
+        cooldownUpdateKeys.Clear();
+        cooldownUpdateKeys.AddRange(powerupCooldowns.Keys);
+
+        for (int i = 0; i < cooldownUpdateKeys.Count; i++)
+        {
+            PowerupType type = cooldownUpdateKeys[i];
+            float current = powerupCooldowns[type];
+            if (current <= 0f)
+            {
+                continue;
+            }
+
+            current = Mathf.Max(0f, current - deltaTime);
+            powerupCooldowns[type] = current;
+            UpdatePowerupVisual(type);
+        }
+    }
+
+    private bool IsPowerupReady(PowerupType type)
+    {
+        EnsurePowerupEntry(type);
+        return !powerupCooldowns.TryGetValue(type, out float remaining) || remaining <= 0.01f;
+    }
+
+    private void StartPowerupCooldown(PowerupType type)
+    {
+        EnsurePowerupEntry(type);
+        float duration = GetPowerupCooldownDuration(type);
+        if (duration <= 0f)
+        {
+            powerupCooldowns[type] = 0f;
+            UpdatePowerupVisual(type);
+            return;
+        }
+
+        powerupCooldowns[type] = duration;
+        UpdatePowerupVisual(type);
+    }
+
+    private void EnsurePowerupEntry(PowerupType type)
+    {
+        if (!powerupCooldownDurations.ContainsKey(type))
+        {
+            powerupCooldownDurations[type] = 0f;
+        }
+
+        if (!powerupCooldowns.ContainsKey(type))
+        {
+            powerupCooldowns[type] = 0f;
+        }
+    }
+
+    private float GetPowerupCooldownDuration(PowerupType type)
+    {
+        return powerupCooldownDurations.TryGetValue(type, out float duration) ? Mathf.Max(0f, duration) : 0f;
+    }
+
+    private void UpdatePowerupVisual(PowerupType type)
+    {
+        float remaining = powerupCooldowns.TryGetValue(type, out float value) ? value : 0f;
+        bool ready = remaining <= 0.01f;
+
+        for (int i = 0; i < powerupButtons.Count; i++)
+        {
+            if (powerupButtons[i].powerup != type)
+            {
+                continue;
+            }
+
+            var binding = powerupButtons[i];
+            if (binding.button != null)
+            {
+                binding.button.interactable = ready;
+            }
+
+            if (binding.cooldownOverlay != null)
+            {
+                binding.cooldownOverlay.alpha = ready ? 0f : 1f;
+                binding.cooldownOverlay.interactable = !ready;
+                binding.cooldownOverlay.blocksRaycasts = !ready;
+            }
+
+            if (binding.cooldownLabel != null)
+            {
+                binding.cooldownLabel.text = ready ? string.Empty : Mathf.CeilToInt(remaining).ToString();
+            }
+        }
+    }
+
+    [System.Serializable]
+    private struct PowerupButtonBinding
+    {
+        public PowerupType powerup;
+        public Selectable button;
+        public CanvasGroup cooldownOverlay;
+        public TMP_Text cooldownLabel;
     }
 }

@@ -13,7 +13,7 @@ GameObject:
   - component: {fileID: 9019574901115467396}
   - component: {fileID: 6284807497357251881}
   m_Layer: 0
-  m_Name: Target Block Type1
+  m_Name: Target Block Type1 1
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -83,7 +83,7 @@ SpriteRenderer:
   m_SortingLayer: 0
   m_SortingOrder: 3
   m_MaskInteraction: 0
-  m_Sprite: {fileID: -6265872627317024188, guid: 118468439d6a449848f1a0e321b95722, type: 3}
+  m_Sprite: {fileID: -5363712094673921063, guid: f9ebc228269ee406e84f0f975c6dd31b, type: 3}
   m_Color: {r: 1, g: 1, b: 1, a: 1}
   m_FlipX: 0
   m_FlipY: 0
@@ -152,9 +152,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::StaticBlock
   node: {fileID: 0}
-  blockType: 10
+  blockType: 11
   archetype: 5
   spriteRenderer: {fileID: 799185347408549920}
-  defaultIcon: {fileID: -6265872627317024188, guid: 118468439d6a449848f1a0e321b95722, type: 3}
+  defaultIcon: {fileID: -5363712094673921063, guid: f9ebc228269ee406e84f0f975c6dd31b, type: 3}
   baseLocalScale: {x: 0.25, y: 0.25, z: 0.54038}
-  staticBlastEffect: {fileID: 3788187274286152095, guid: 821ded86fb1be4bdb9551cd8fb60f1bf, type: 3}
+  staticBlastEffect: {fileID: 3788187274286152095, guid: 2a62300df2ab54c6bbdf45cdcf4cbbdc, type: 3}
