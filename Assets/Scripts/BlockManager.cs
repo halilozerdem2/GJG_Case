@@ -29,6 +29,9 @@ public class BlockManager : MonoBehaviour
     private static readonly ProfilerMarker DeadlockCheckMarker = new ProfilerMarker("BlockManager.DeadlockCheck");
 
     private const int MaxColorIds = 256;
+    private const float SpecialSpawnScaleDuration = 0.25f;
+    private const float SpecialPulseDuration = 0.65f;
+    private const float SpecialPulseMultiplier = 1.2f;
     private readonly List<BlockMove> blockMoves = new List<BlockMove>(64);
     private readonly List<int> pendingSpawnIndices = new List<int>(64);
     private readonly List<BlockAnimation> activeAnimations = new List<BlockAnimation>(128);
@@ -169,12 +172,7 @@ public class BlockManager : MonoBehaviour
         GroupContext groupContext = new GroupContext(block, groupIndicesBuffer, groupCount, block.blockType);
         Audio?.PlayBlockSfx(block.blockType);
 
-        block.HandleBlastResult(groupContext);
-        ClearBlocksForContext(groupContext, nodeGrid);
-
-        TrySpawnSpecialBlock(groupContext, originNode);
-
-        return true;
+        return ExecuteBlast(groupContext, originNode, true, false);
     }
 
     private bool TryExecuteSpecialBlock(Block block)
@@ -191,10 +189,37 @@ public class BlockManager : MonoBehaviour
         }
 
         GroupContext context = new GroupContext(block, groupIndicesBuffer, count, block.blockType);
-        block.ActivateSpecialEffect(context);
-        block.HandleBlastResult(context);
-        Node[,] nodeGrid = gridManager?.NodeGrid;
-        return ClearBlocksForContext(context, nodeGrid);
+        return ExecuteBlast(context, null, false, true);
+    }
+
+    private bool ExecuteBlast(in GroupContext context, Node originNode, bool allowSpecialSpawn, bool activateSpecial)
+    {
+        if (!context.IsValid || gridManager == null)
+        {
+            return false;
+        }
+
+        Node[,] nodeGrid = gridManager.NodeGrid;
+        if (nodeGrid == null)
+        {
+            return false;
+        }
+
+        Block origin = context.Origin;
+        if (activateSpecial)
+        {
+            origin?.ActivateSpecialEffect(context);
+        }
+
+        origin?.HandleBlastResult(context);
+        bool cleared = ClearBlocksForContext(context, nodeGrid);
+
+        if (cleared && allowSpecialSpawn)
+        {
+            TrySpawnSpecialBlock(context, originNode);
+        }
+
+        return cleared;
     }
 
     private bool ClearBlocksForContext(GroupContext context, Node[,] nodeGrid)
@@ -1737,7 +1762,62 @@ public class BlockManager : MonoBehaviour
         SetModelCell(targetNode.gridPosition, blockType);
         SnapBlockToNode(spawned, targetNode);
         gridManager?.FreeNodes.Remove(targetNode);
+        if (spawned.IsSpecialVariant)
+        {
+            AnimateSpecialSpawn(spawned);
+        }
         return spawned;
+    }
+
+    private void AnimateSpecialSpawn(Block block)
+    {
+        if (block == null)
+        {
+            return;
+        }
+
+        Transform target = block.transform;
+        DOTween.Kill(target);
+        target.localScale = Vector3.zero;
+
+        target.DOScale(block.BaseLocalScale, SpecialSpawnScaleDuration)
+            .SetEase(Ease.OutBack)
+            .SetTarget(target)
+            .OnComplete(() => StartSpecialIdleTween(block));
+    }
+
+    private void StartSpecialIdleTween(Block block)
+    {
+        if (block == null)
+        {
+            return;
+        }
+
+        Transform target = block.transform;
+        DOTween.Kill(target);
+        Vector3 baseScale = block.BaseLocalScale;
+        target.localScale = baseScale;
+
+        Tween tween = null;
+        switch (block.Archetype)
+        {
+            case Block.BlockArchetype.Bomb2x2:
+                tween = target.DOScale(baseScale * SpecialPulseMultiplier, SpecialPulseDuration);
+                break;
+            case Block.BlockArchetype.ColumnClear:
+                tween = target.DOScaleY(baseScale.y * SpecialPulseMultiplier, SpecialPulseDuration);
+                break;
+            case Block.BlockArchetype.RowClear:
+                tween = target.DOScaleX(baseScale.x * SpecialPulseMultiplier, SpecialPulseDuration);
+                break;
+        }
+
+        if (tween != null)
+        {
+            tween.SetEase(Ease.InOutSine)
+                .SetLoops(-1, LoopType.Yoyo)
+                .SetTarget(target);
+        }
     }
 
     private void RequireFullBoardRefresh()

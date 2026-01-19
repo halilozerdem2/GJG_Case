@@ -212,7 +212,7 @@ public class BoardRegeneratorUI : MonoBehaviour
         bool isValid = true;
 
         thresholdA = ParseOrClamp(thresholdAText, 2, ref isValid);
-        thresholdB = ParseOrClamp(thresholdBText, Mathf.Max(thresholdA + 1, 3), ref isValid);
+        thresholdB = ParseOrClamp(thresholdBText, CalculateMinimumThresholdB(thresholdA), ref isValid);
         thresholdC = ParseOrClamp(thresholdCText, Mathf.Max(thresholdB + 1, 4), ref isValid);
 
         return isValid;
@@ -252,6 +252,17 @@ public class BoardRegeneratorUI : MonoBehaviour
         target.DOScale(ruleBaseScale * rulePulseScale, rulePulseDuration)
             .SetLoops(2, LoopType.Yoyo)
             .SetEase(Ease.OutQuad);
+    }
+
+    private static int CalculateMinimumThresholdB(int thresholdA)
+    {
+        int minimum = thresholdA + 2;
+        if (thresholdA == 3)
+        {
+            minimum = Mathf.Max(minimum, 5);
+        }
+
+        return minimum;
     }
 
     private void SetApplyButtonSelectedColor(Color color)

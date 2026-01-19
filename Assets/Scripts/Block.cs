@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using DG.Tweening;
 using UnityEngine;
 
 public abstract class Block : MonoBehaviour
@@ -121,6 +122,7 @@ public abstract class Block : MonoBehaviour
         transform.localScale = baseLocalScale;
         transform.localRotation = Quaternion.identity;
         transform.localPosition = Vector3.zero;
+        DOTween.Kill(transform);
 
         OnStateReset();
     }

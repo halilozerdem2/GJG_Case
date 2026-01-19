@@ -152,6 +152,8 @@ public class GameModeConfig : ScriptableObject
                     return settings.ThresholdB;
                 case BoardThresholdKey.ThresholdC:
                     return settings.ThresholdC;
+                case BoardThresholdKey.ThresholdD:
+                    return settings.ThresholdA + 1;
                 default:
                     return settings.ThresholdA;
             }
@@ -163,12 +165,13 @@ public class GameModeConfig : ScriptableObject
         }
     }
 
-    public enum BoardThresholdKey
-    {
-        ThresholdA,
-        ThresholdB,
-        ThresholdC
-    }
+        public enum BoardThresholdKey
+        {
+            ThresholdA,
+            ThresholdB,
+            ThresholdC,
+            ThresholdD
+        }
 
     [Serializable]
     public struct StaticTargetSpawn

@@ -58,9 +58,15 @@ public class BoardSettings : ScriptableObject
             return false;
         }
 
-        if (!(thresholdA < thresholdB && thresholdB < thresholdC))
+        if (thresholdB < CalculateMinimumThresholdB(thresholdA))
         {
-            message = "Thresholds must satisfy A < B < C.";
+            message = "Threshold B must be at least Threshold A + 2 (and >=5 when A=3).";
+            return false;
+        }
+
+        if (thresholdC <= thresholdB)
+        {
+            message = "Thresholds must satisfy B < C.";
             return false;
         }
 
@@ -137,8 +143,19 @@ public class BoardSettings : ScriptableObject
     public void ApplyThresholds(int newThresholdA, int newThresholdB, int newThresholdC)
     {
         thresholdA = Mathf.Max(2, newThresholdA);
-        thresholdB = Mathf.Max(thresholdA + 1, newThresholdB);
+        thresholdB = Mathf.Max(CalculateMinimumThresholdB(thresholdA), newThresholdB);
         thresholdC = Mathf.Max(thresholdB + 1, newThresholdC);
+    }
+
+    private int CalculateMinimumThresholdB(int a)
+    {
+        int minimum = a + 2;
+        if (a == 3)
+        {
+            minimum = Mathf.Max(minimum, 5);
+        }
+
+        return minimum;
     }
 
     private bool ValidateBlockPrefabs(out string message)

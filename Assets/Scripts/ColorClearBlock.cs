@@ -1,12 +1,25 @@
+using System;
 using UnityEngine;
 
 public class ColorClearBlock : SpecialBlock
 {
+    [Serializable]
+    private struct ColorVariant
+    {
+        public int blockType;
+        public Sprite icon;
+    }
+
+    [SerializeField] private ColorVariant[] variantIcons = Array.Empty<ColorVariant>();
+    [SerializeField] private float rotationSpeed = 180f;
+
     private byte targetColorId = BoardModel.EmptyColorId;
+    private int mappedVariantBlockType = -1;
 
     public void ConfigureTargetColor(int sourceBlockType)
     {
         targetColorId = (byte)Mathf.Clamp(sourceBlockType, 0, byte.MaxValue);
+        ApplyVariantSprite(sourceBlockType);
     }
 
     public override int GatherSearchResults(BlockSearchData searchData)
@@ -37,9 +50,50 @@ public class ColorClearBlock : SpecialBlock
         return count;
     }
 
+
     protected override void OnStateReset()
     {
         base.OnStateReset();
         targetColorId = BoardModel.EmptyColorId;
+        mappedVariantBlockType = -1;
+    }
+
+    private void ApplyVariantSprite(int blockType)
+    {
+        if (mappedVariantBlockType == blockType)
+        {
+            return;
+        }
+
+        Sprite variantSprite = null;
+        for (int i = 0; i < variantIcons.Length; i++)
+        {
+            if (variantIcons[i].blockType == blockType)
+            {
+                variantSprite = variantIcons[i].icon;
+                break;
+            }
+        }
+
+        if (variantSprite != null)
+        {
+            SetSprite(variantSprite);
+            mappedVariantBlockType = blockType;
+        }
+        else
+        {
+            mappedVariantBlockType = -1;
+            SetSprite(DefaultIcon);
+        }
+    }
+
+    private void Update()
+    {
+        if (!enabled || rotationSpeed == 0f)
+        {
+            return;
+        }
+
+        transform.Rotate(0f, 0f, rotationSpeed * Time.deltaTime);
     }
 }

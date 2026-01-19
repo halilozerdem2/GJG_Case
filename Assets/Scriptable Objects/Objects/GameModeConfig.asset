@@ -40,11 +40,15 @@ MonoBehaviour:
     spawnArchetype: 4
     useGroupColor: 0
     overrideBlockType: 8
+  - thresholdKey: 3
+    spawnArchetype: 2
+    useGroupColor: 0
+    overrideBlockType: 9
   staticTargetSpawns:
-  - targetPrefab: {fileID: 0}
-    minPerBoard: 0
-    maxPerBoard: 0
-    normalizedWeight: 0
+  - targetPrefab: {fileID: 6284807497357251881, guid: c2b3f80a7a658452491693cdb7c7be4e, type: 3}
+    minPerBoard: 10
+    maxPerBoard: 20
+    normalizedWeight: 0.415
   specialBlockPrefabs:
   - archetype: 2
     prefab: {fileID: 4669070400807551858, guid: 47df092c6ab5849bdb7e72c29bc0c224, type: 3}

@@ -29,7 +29,7 @@ Transform:
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
   m_LocalPosition: {x: 0, y: 0, z: 0}
-  m_LocalScale: {x: 0.45, y: 0.45, z: 1}
+  m_LocalScale: {x: 0.12, y: 0.12, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 0}
@@ -127,7 +127,7 @@ BoxCollider2D:
   m_UsedByEffector: 0
   m_CompositeOperation: 0
   m_CompositeOrder: 0
-  m_Offset: {x: 0, y: 0}
+  m_Offset: {x: 0, y: -0.028312683}
   m_SpriteTilingProperty:
     border: {x: 0, y: 0, z: 0, w: 0}
     pivot: {x: 0.5, y: 0.5}
@@ -137,7 +137,7 @@ BoxCollider2D:
     drawMode: 0
     adaptiveTiling: 0
   m_AutoTiling: 0
-  m_Size: {x: 2.25, y: 2.56}
+  m_Size: {x: 8.648594, y: 8.67547}
   m_EdgeRadius: 0
 --- !u!114 &4669070400807551858
 MonoBehaviour:
@@ -156,6 +156,20 @@ MonoBehaviour:
   archetype: 4
   spriteRenderer: {fileID: 799185347408549920}
   defaultIcon: {fileID: 2942787469214966143, guid: 7ee13f47360dc439a9a912695ca02af2, type: 3}
-  baseLocalScale: {x: 0.45, y: 0.45, z: 1}
+  baseLocalScale: {x: 0.12, y: 0.12, z: 1}
   participateInGroups: 0
   defaultBombRadius: 1
+  variantIcons:
+  - blockType: 0
+    icon: {fileID: -8112942695318604452, guid: 6cbc06f0305f14105b993778d3374165, type: 3}
+  - blockType: 1
+    icon: {fileID: -1138500698073922672, guid: 259309484c0d14d218928b7374e407f3, type: 3}
+  - blockType: 2
+    icon: {fileID: 8602588678386003608, guid: c171caafaaae346e28fb8e57b99c9afd, type: 3}
+  - blockType: 3
+    icon: {fileID: 6749251910191096821, guid: 78060a4c837e6405b9ef00df44c7ff47, type: 3}
+  - blockType: 4
+    icon: {fileID: -4985457975541173325, guid: 4faa359ab2b2142338075bfffadeb28f, type: 3}
+  - blockType: 5
+    icon: {fileID: -7601994034151040684, guid: 00644dc4a01194362bd82c47de697df4, type: 3}
+  rotationSpeed: 200
