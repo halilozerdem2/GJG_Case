@@ -290,7 +290,7 @@ public class LevelCanvasManager : MonoBehaviour
         {
             PowerupType type = powerupButtons[i].powerup;
             EnsurePowerupEntry(type);
-            powerupCooldowns[type] = 0f;
+            powerupCooldowns[type] = GetPowerupCooldownDuration(type);
             UpdatePowerupVisual(type);
         }
     }

@@ -258,6 +258,30 @@ public class GameManager : MonoBehaviour
         Hard
     }
 
+    public void RetryCurrentLevel()
+    {
+        StopLimitTimer();
+        _state = GameState.Pause;
+        var activeScene = SceneManager.GetActiveScene();
+        if (!activeScene.IsValid())
+        {
+            return;
+        }
+
+        gridManager = null;
+        blockManager = null;
+        Time.timeScale = 1f;
+        SceneManager.LoadScene(activeScene.buildIndex);
+    }
+
+    public void ReturnToMainMenu()
+    {
+        StopLimitTimer();
+        _state = GameState.Pause;
+        Time.timeScale = 1f;
+        SceneManager.LoadScene(0);
+    }
+
     private void ApplyPerformanceSettings()
     {
         QualitySettings.vSyncCount = Mathf.Max(0, vSyncCount);

@@ -13,6 +13,8 @@ public class ObjectiveController : MonoBehaviour
     [Header("Time UI")]
     [SerializeField] private CanvasGroup timeGroup;
     [SerializeField] private TMP_Text timeLabel;
+    [SerializeField] private Color timeWarningColor = Color.red;
+    [SerializeField, Min(0f)] private float timeWarningThresholdSeconds = 10f;
 
     private GameManager gameManager;
     private readonly Dictionary<int, TargetProgress> targetProgressLookup = new Dictionary<int, TargetProgress>();
@@ -20,10 +22,15 @@ public class ObjectiveController : MonoBehaviour
     private int maxMoves;
     private float currentTime;
     private float maxTime;
+    private Color timeDefaultColor = Color.white;
 
     private void Awake()
     {
         ResolveReferences();
+        if (timeLabel != null)
+        {
+            timeDefaultColor = timeLabel.color;
+        }
     }
 
     private void OnEnable()
@@ -206,7 +213,9 @@ public class ObjectiveController : MonoBehaviour
 
         if (timeLabel != null)
         {
-            timeLabel.text = maxTime > 0f ? FormatTime(currentTime) : string.Empty;
+            bool showTime = maxTime > 0f;
+            timeLabel.text = showTime ? FormatTime(currentTime) : string.Empty;
+            UpdateTimeColor(showTime);
         }
 
     }
@@ -234,7 +243,25 @@ public class ObjectiveController : MonoBehaviour
         if (!visible && timeLabel != null)
         {
             timeLabel.text = string.Empty;
+            timeLabel.color = timeDefaultColor;
         }
+    }
+
+    private void UpdateTimeColor(bool showTime)
+    {
+        if (timeLabel == null)
+        {
+            return;
+        }
+
+        if (!showTime)
+        {
+            timeLabel.color = timeDefaultColor;
+            return;
+        }
+
+        bool useWarning = timeWarningThresholdSeconds > 0f && currentTime <= timeWarningThresholdSeconds;
+        timeLabel.color = useWarning ? timeWarningColor : timeDefaultColor;
     }
 
     private static void UpdateCanvasGroup(CanvasGroup group, bool visible)

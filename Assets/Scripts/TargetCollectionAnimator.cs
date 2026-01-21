@@ -106,13 +106,13 @@ public class TargetCollectionAnimator : MonoBehaviour
         RectTransform indicator = GetIndicator();
         PrepareIndicator(indicator, binding);
 
-        if (!TryGetCanvasPosition(worldPosition, out Vector2 start))
+        if (!TryGetCanvasPosition(worldPosition, false, out Vector2 start))
         {
             ReleaseIndicator(indicator);
             return;
         }
 
-        if (!TryGetCanvasPosition(binding.target.position, out Vector2 targetPos))
+        if (!TryGetCanvasPosition(binding.target.position, true, out Vector2 targetPos))
         {
             ReleaseIndicator(indicator);
             return;
@@ -123,7 +123,7 @@ public class TargetCollectionAnimator : MonoBehaviour
         StartCoroutine(AnimateIndicator(indicator, targetPos));
     }
 
-    private bool TryGetCanvasPosition(Vector3 worldPosition, out Vector2 canvasPosition)
+    private bool TryGetCanvasPosition(Vector3 worldPosition, bool useCanvasCamera, out Vector2 canvasPosition)
     {
         canvasPosition = Vector2.zero;
         if (canvasRoot == null)
@@ -131,7 +131,7 @@ public class TargetCollectionAnimator : MonoBehaviour
             return false;
         }
 
-        Camera referenceCamera = canvasCamera != null ? canvasCamera : worldCamera;
+        Camera referenceCamera = useCanvasCamera ? canvasCamera : worldCamera;
         if (referenceCamera == null)
         {
             referenceCamera = Camera.main;
@@ -141,7 +141,8 @@ public class TargetCollectionAnimator : MonoBehaviour
             ? referenceCamera.WorldToScreenPoint(worldPosition)
             : worldPosition;
 
-        return RectTransformUtility.ScreenPointToLocalPointInRectangle(canvasRoot, screenPoint, canvasCamera, out canvasPosition);
+        Camera uiCamera = canvasCamera;
+        return RectTransformUtility.ScreenPointToLocalPointInRectangle(canvasRoot, screenPoint, uiCamera, out canvasPosition);
     }
 
     private RectTransform GetIndicator()

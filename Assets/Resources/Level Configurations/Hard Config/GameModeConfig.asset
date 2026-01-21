@@ -16,18 +16,18 @@ MonoBehaviour:
   boardSettings: {fileID: 11400000, guid: 550049c0ec794f668ce1bee211ca4f8a, type: 2}
   limits:
     useMoveLimit: 1
-    moveLimit: 10
+    moveLimit: 15
     useTimeLimit: 1
-    timeLimitSeconds: 120
+    timeLimitSeconds: 45
   powerupCooldowns:
   - powerup: 0
-    cooldownSeconds: 3
+    cooldownSeconds: 5
   - powerup: 1
-    cooldownSeconds: 2
+    cooldownSeconds: 10
   - powerup: 2
-    cooldownSeconds: 1
-  - powerup: 2
-    cooldownSeconds: 1
+    cooldownSeconds: 45
+  - powerup: 3
+    cooldownSeconds: 20
   specialBlockThresholds:
   - thresholdKey: 0
     spawnArchetype: 1
@@ -47,20 +47,20 @@ MonoBehaviour:
     overrideBlockType: 9
   staticTargetSpawns:
   - targetPrefab: {fileID: 6284807497357251881, guid: c2b3f80a7a658452491693cdb7c7be4e, type: 3}
-    overrideTargetBlockType: 1
-    targetBlockType: 10
     placementMask:
       customCells: 0000000000000000000101010101010000010100000101000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-  - targetPrefab: {fileID: 6284807497357251881, guid: 68e76db2cae794086bec47d742b1c064, type: 3}
     overrideTargetBlockType: 1
-    targetBlockType: 11
+    targetBlockType: 10
+  - targetPrefab: {fileID: 6284807497357251881, guid: 68e76db2cae794086bec47d742b1c064, type: 3}
     placementMask:
       customCells: 0000000000000000000000000000000000000000000000000001010000010100000000000000000000000101010100000000000101000000000000000000000000000000000000000000000000000000
-  - targetPrefab: {fileID: 6284807497357251881, guid: 4b8bd19e8675e412888d1b03943e28e8, type: 3}
     overrideTargetBlockType: 1
-    targetBlockType: 12
+    targetBlockType: 11
+  - targetPrefab: {fileID: 6284807497357251881, guid: 4b8bd19e8675e412888d1b03943e28e8, type: 3}
     placementMask:
       customCells: 0000000000000000000000000000000000000000000000000000000000000000010101010101010101000000000000010100000000000001000000000000000000000000000000000000000000000000
+    overrideTargetBlockType: 1
+    targetBlockType: 12
   specialBlockPrefabs:
   - archetype: 2
     prefab: {fileID: 4669070400807551858, guid: 47df092c6ab5849bdb7e72c29bc0c224, type: 3}
