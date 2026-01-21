@@ -13,7 +13,7 @@ GameObject:
   - component: {fileID: 9019574901115467396}
   - component: {fileID: 6284807497357251881}
   m_Layer: 0
-  m_Name: Target Block Type1 1
+  m_Name: Purple Target
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0

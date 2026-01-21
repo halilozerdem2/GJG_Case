@@ -15,6 +15,14 @@ public class GameManager : MonoBehaviour
     [SerializeField] private string mainMenuSceneName = "MainMenu";
     [SerializeField] private GameMode startupMode = GameMode.Game;
     [SerializeField] private List<GameModeConfigBinding> gameModeConfigs = new List<GameModeConfigBinding>();
+    private static readonly Dictionary<GameMode, string> ModeResourcePaths = new Dictionary<GameMode, string>
+    {
+        { GameMode.Game, "Level Configurations/Objects/GameModeConfig" },
+        { GameMode.Case, "Level Configurations/Case Scene Configurations/GameModeConfig" },
+        { GameMode.Easy, "Level Configurations/Easy Config/GameModeConfig" },
+        { GameMode.Medium, "Level Configurations/Medium Config/GameModeConfig" },
+        { GameMode.Hard, "Level Configurations/Hard Config/GameModeConfig" }
+    };
 
     private GameState _state;
     private GameMode _currentGameMode = GameMode.Game;
@@ -34,7 +42,7 @@ public class GameManager : MonoBehaviour
 
     public GameMode CurrentGameMode => _currentGameMode;
     public bool IsCaseMode => _currentGameMode == GameMode.Case;
-    public bool IsGameMode => _currentGameMode == GameMode.Game;
+    public bool IsGameMode => _currentGameMode != GameMode.Case;
     public GameModeConfig ActiveGameModeConfig => _activeGameModeConfig;
     public GameModeConfig.MoveTimeLimitSettings ActiveLimitSettings => _activeGameModeConfig != null ? _activeGameModeConfig.Limits : GameModeConfig.MoveTimeLimitSettings.Default;
     public IReadOnlyList<GameModeConfig.PowerupCooldownEntry> ActivePowerupCooldowns => _activeGameModeConfig != null ? _activeGameModeConfig.PowerupCooldowns : EmptyPowerupCooldowns;
@@ -86,6 +94,11 @@ public class GameManager : MonoBehaviour
 
     private void ChangeState(GameState newState)
     {
+        if (IsTerminalGameState(_state))
+        {
+            return;
+        }
+
         _state = newState;
         StateChanged?.Invoke(_state);
         switch (newState)
@@ -109,9 +122,11 @@ public class GameManager : MonoBehaviour
                 break;
             case GameState.Win:
                 StopLimitTimer();
+                WinLosePanelController.ActiveInstance?.ShowWinPanel();
                 break;
             case GameState.Lose:
                 StopLimitTimer();
+                WinLosePanelController.ActiveInstance?.ShowLosePanel();
                 break;
             case GameState.Pause:
                 break;
@@ -237,7 +252,10 @@ public class GameManager : MonoBehaviour
     public enum GameMode
     {
         Game,
-        Case
+        Case,
+        Easy,
+        Medium,
+        Hard
     }
 
     private void ApplyPerformanceSettings()
@@ -280,6 +298,7 @@ public class GameManager : MonoBehaviour
             return;
         }
 
+        ApplyBoardSettingsToManagers();
         ApplyLimitSettings();
         ChangeState(GameState.GenerateLevel);
     }
@@ -455,20 +474,68 @@ public class GameManager : MonoBehaviour
 
     private void ResolveActiveGameModeConfig(GameMode mode)
     {
-        if (_configLookup.Count == 0)
+        GameModeConfig config = LoadConfigFromResources(mode);
+        if (config == null)
         {
-            BuildGameModeConfigLookup();
-        }
+            if (_configLookup.Count == 0)
+            {
+                BuildGameModeConfigLookup();
+            }
 
-        if (_configLookup.TryGetValue(mode, out GameModeConfig config))
-        {
-            _activeGameModeConfig = config;
+            _configLookup.TryGetValue(mode, out config);
         }
         else
         {
-            _activeGameModeConfig = null;
-            Debug.LogWarning($"GameManager does not have a GameModeConfig assigned for mode {mode}.");
+            _configLookup[mode] = config;
         }
+
+        _activeGameModeConfig = config;
+        if (_activeGameModeConfig == null)
+        {
+            Debug.LogWarning($"GameManager does not have a GameModeConfig assigned for mode {mode}.");
+            return;
+        }
+
+        ApplyBoardSettingsToManagers();
+    }
+
+    private GameModeConfig LoadConfigFromResources(GameMode mode)
+    {
+        if (!ModeResourcePaths.TryGetValue(mode, out string resourcePath) || string.IsNullOrEmpty(resourcePath))
+        {
+            return null;
+        }
+
+        GameModeConfig config = Resources.Load<GameModeConfig>(resourcePath);
+        if (config == null)
+        {
+            Debug.LogWarning($"Unable to load GameModeConfig for mode {mode} at Resources/{resourcePath}.");
+        }
+
+        return config;
+    }
+
+    private void ApplyBoardSettingsToManagers()
+    {
+        if (_activeGameModeConfig == null)
+        {
+            return;
+        }
+
+        BoardSettings settings = _activeGameModeConfig.BoardSettings;
+        if (settings == null)
+        {
+            Debug.LogWarning($"GameModeConfig for mode {_currentGameMode} is missing BoardSettings.");
+            return;
+        }
+
+        gridManager?.SetBoardSettings(settings);
+        blockManager?.SetBoardSettings(settings);
+    }
+
+    private static bool IsTerminalGameState(GameState state)
+    {
+        return state == GameState.Win || state == GameState.Lose;
     }
 
     [Serializable]

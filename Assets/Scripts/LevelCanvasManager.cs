@@ -224,7 +224,7 @@ public class LevelCanvasManager : MonoBehaviour
 
     public void GoToPlayScene()
     {
-        SetGameMode(GameManager.GameMode.Game);
+        SetGameMode(GameManager.GameMode.Easy);
         LoadSceneByIndex(2);
     }
 

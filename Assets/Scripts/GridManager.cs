@@ -36,6 +36,11 @@ public class GridManager : MonoBehaviour
     public Transform GridRoot => gridRoot;
     public int TotalNodeCount => totalNodeCount;
 
+    public void SetBoardSettings(BoardSettings settings)
+    {
+        boardSettings = settings;
+    }
+
     public void InitializeGrid()
     {
         if (!ValidateBoardSettings())

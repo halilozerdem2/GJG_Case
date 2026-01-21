@@ -12,8 +12,11 @@ public class MainMenuCanvasController : MonoBehaviour
     [SerializeField] private float invalidModePulseScale = 1.1f;
     [SerializeField] private float invalidModePulseDuration = 0.2f;
     [SerializeField] private int[] modeSceneBuildIndices = { -1, 1, 2, 3 };
+    [Header("Level Configurations")]
+    [SerializeField] private GameObject difficultySelectionPanel;
 
     private Vector3 dropdownBaseScale = Vector3.one;
+    private int pendingSceneBuildIndex = -1;
 
     private void Awake()
     {
@@ -31,12 +34,14 @@ public class MainMenuCanvasController : MonoBehaviour
 
     public void GoToPlayScene()
     {
-        SetExplicitGameMode(GameManager.GameMode.Game);
+        SetExplicitGameMode(GameManager.GameMode.Easy);
         LoadScene(playSceneIndex);
     }
 
     public void HandlePlayButtonClicked()
     {
+        pendingSceneBuildIndex = -1;
+
         if (gameModeDropdown == null)
         {
             LoadScene(playSceneIndex);
@@ -54,6 +59,20 @@ public class MainMenuCanvasController : MonoBehaviour
         if (targetScene < 0)
         {
             PulseInvalidDropdown();
+            return;
+        }
+
+        if (selection == 1)
+        {
+            if (difficultySelectionPanel == null)
+            {
+                ApplyGameModeFromSelection(selection);
+                LoadScene(targetScene);
+                return;
+            }
+
+            pendingSceneBuildIndex = targetScene;
+            ShowDifficultyPanel();
             return;
         }
 
@@ -100,8 +119,61 @@ public class MainMenuCanvasController : MonoBehaviour
             return;
         }
 
-        var mode = selection == 1 ? GameManager.GameMode.Game : GameManager.GameMode.Case;
+        if (selection == 1)
+        {
+            gameManager.SetGameMode(GameManager.GameMode.Easy);
+            return;
+        }
+
+        gameManager.SetGameMode(GameManager.GameMode.Case);
+    }
+
+    private void ShowDifficultyPanel()
+    {
+        if (difficultySelectionPanel != null)
+        {
+            difficultySelectionPanel.SetActive(true);
+        }
+    }
+
+    private void HideDifficultyPanel()
+    {
+        if (difficultySelectionPanel != null)
+        {
+            difficultySelectionPanel.SetActive(false);
+        }
+
+        pendingSceneBuildIndex = -1;
+    }
+
+    public void SelectEasyDifficulty()
+    {
+        ApplyDifficultySelection(GameManager.GameMode.Easy);
+    }
+
+    public void SelectMediumDifficulty()
+    {
+        ApplyDifficultySelection(GameManager.GameMode.Medium);
+    }
+
+    public void SelectHardDifficulty()
+    {
+        ApplyDifficultySelection(GameManager.GameMode.Hard);
+    }
+
+    private void ApplyDifficultySelection(GameManager.GameMode mode)
+    {
+        var gameManager = GameManager.Instance;
+        if (gameManager == null)
+        {
+            return;
+        }
+
         gameManager.SetGameMode(mode);
+
+        int targetScene = pendingSceneBuildIndex >= 0 ? pendingSceneBuildIndex : playSceneIndex;
+        HideDifficultyPanel();
+        LoadScene(targetScene);
     }
 
     private void SetExplicitGameMode(GameManager.GameMode mode)

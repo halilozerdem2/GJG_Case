@@ -105,6 +105,11 @@ public class BlockManager : MonoBehaviour
         return false;
     }
 
+    public void SetBoardSettings(BoardSettings settings)
+    {
+        boardSettings = settings;
+    }
+
     private void OnEnable()
     {
         RefreshAudioManagerReference();

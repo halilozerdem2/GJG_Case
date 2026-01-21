@@ -180,9 +180,15 @@ public class GameModeConfig : ScriptableObject
     {
         [SerializeField] private Block targetPrefab;
         [SerializeField] private StaticPlacementMask placementMask;
+        [SerializeField] private bool overrideTargetBlockType;
+        [SerializeField] private int targetBlockType;
 
         public Block TargetPrefab => targetPrefab;
         public StaticPlacementMask PlacementMask => placementMask;
+        public int TargetBlockType => overrideTargetBlockType
+            ? targetBlockType
+            : targetPrefab != null ? targetPrefab.blockType : -1;
+        public bool HasTargetBlockTypeOverride => overrideTargetBlockType;
     }
 
     [Serializable]

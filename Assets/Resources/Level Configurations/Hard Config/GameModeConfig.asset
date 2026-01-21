@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: GameModeConfig
   m_EditorClassIdentifier: Assembly-CSharp::GameModeConfig
   configId: Game
-  boardSettings: {fileID: 11400000, guid: 2600e121bae2048f9818ec778afa5db2, type: 2}
+  boardSettings: {fileID: 11400000, guid: 550049c0ec794f668ce1bee211ca4f8a, type: 2}
   limits:
     useMoveLimit: 1
     moveLimit: 10

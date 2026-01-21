@@ -176,8 +176,9 @@ public class ObjectiveController : MonoBehaviour
 
         if (gameManager != null)
         {
+            bool wasPending = !gameManager.AreObjectivesComplete;
             gameManager.SetObjectivesPending(pendingTargets);
-            if (!pendingTargets && targetProgressLookup.Count > 0 && !gameManager.AreObjectivesComplete)
+            if (!pendingTargets && targetProgressLookup.Count > 0 && wasPending)
             {
                 gameManager.ReportObjectivesCompletion();
             }
