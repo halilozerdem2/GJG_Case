@@ -1,0 +1,72 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 8b5255f771f914332a86f497493a8d2f, type: 3}
+  m_Name: GameModeConfig
+  m_EditorClassIdentifier: Assembly-CSharp::GameModeConfig
+  configId: Level_01
+  boardSettings: {fileID: 11400000, guid: da64f0e2c7234f00b3a0e6a0efc9c101, type: 2}
+  limits:
+    useMoveLimit: 1
+    moveLimit: 30
+    useTimeLimit: 1
+    timeLimitSeconds: 90
+  powerupCooldowns:
+  - powerup: 0
+    cooldownSeconds: 3
+  - powerup: 1
+    cooldownSeconds: 5
+  - powerup: 2
+    cooldownSeconds: 30
+  - powerup: 3
+    cooldownSeconds: 15
+  specialBlockThresholds:
+  - thresholdKey: 0
+    spawnArchetype: 1
+    useGroupColor: 0
+    overrideBlockType: 6
+  - thresholdKey: 1
+    spawnArchetype: 3
+    useGroupColor: 0
+    overrideBlockType: 7
+  - thresholdKey: 2
+    spawnArchetype: 4
+    useGroupColor: 0
+    overrideBlockType: 8
+  - thresholdKey: 3
+    spawnArchetype: 2
+    useGroupColor: 0
+    overrideBlockType: 9
+  staticTargetSpawns:
+  - targetPrefab: {fileID: 6284807497357251881, guid: c2b3f80a7a658452491693cdb7c7be4e, type: 3}
+    placementMask:
+      customCells: 0000000000000000000101010101010000010000000001000001000000000100000100000000010000010000000001000000000000000000000000000000000000000000000000000000000000000000
+    overrideTargetBlockType: 1
+    targetBlockType: 10
+  - targetPrefab: {fileID: 6284807497357251881, guid: 68e76db2cae794086bec47d742b1c064, type: 3}
+    placementMask:
+      customCells: 0000000000000000000000000000000000000101010100000000010000010000000001000001000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+    overrideTargetBlockType: 1
+    targetBlockType: 11
+  - targetPrefab: {fileID: 6284807497357251881, guid: 4b8bd19e8675e412888d1b03943e28e8, type: 3}
+    placementMask:
+      customCells: 0000010101010000000000000000000000000000000000000000000101000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+    overrideTargetBlockType: 1
+    targetBlockType: 11
+  specialBlockPrefabs:
+  - archetype: 2
+    prefab: {fileID: 4669070400807551858, guid: 47df092c6ab5849bdb7e72c29bc0c224, type: 3}
+  - archetype: 1
+    prefab: {fileID: 4669070400807551858, guid: de470a0103ac04455aabeb1cb45e7771, type: 3}
+  - archetype: 3
+    prefab: {fileID: 4669070400807551858, guid: b778b76e3848f446ab8ae5fac2f38cbc, type: 3}
+  - archetype: 4
+    prefab: {fileID: 4669070400807551858, guid: 404ad080f679e4b7ebe38f16d568e531, type: 3}

@@ -1,0 +1,35 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 405f46713e9f3413b8a462a988f79c9a, type: 3}
+  m_Name: Board Settings
+  m_EditorClassIdentifier: Assembly-CSharp::BoardSettings
+  rows: 10
+  columns: 8
+  colors: 6
+  blockPrefabs:
+  - {fileID: 5479151943636131643, guid: f6fed28195f7948a58326dbf02721526, type: 3}
+  - {fileID: 6158389639314018576, guid: c8fe9262e59c64122b4a7727326e8bab, type: 3}
+  - {fileID: 617201049480524420, guid: e9e72813ea53e4043a534e81f070b5bc, type: 3}
+  - {fileID: 7061833291720419831, guid: 699255edc357647359d756139bac7ba3, type: 3}
+  - {fileID: 6189661848188300180, guid: 2bda851c67d664611be2044a3a1c655f, type: 3}
+  - {fileID: 4982964331940292706, guid: e29d17fbbf32f444ab01ac13b0e25818, type: 3}
+  blastEffectPrefabs:
+  - {fileID: 3788187274286152095, guid: 92dcc53305e474ff7b71822eb9c808c2, type: 3}
+  - {fileID: 3788187274286152095, guid: 996402487b9c34713bc37d42fd501685, type: 3}
+  - {fileID: 3788187274286152095, guid: 84827aa13d40045c9899d90d373063bf, type: 3}
+  - {fileID: 3788187274286152095, guid: a972e7d86e60f496083c6e2a0aaf78e3, type: 3}
+  - {fileID: 3788187274286152095, guid: 377bff47e09e04f689aacf36e94c5119, type: 3}
+  - {fileID: 3788187274286152095, guid: 04ebf5eb2193f49a2bb5ad771d8025c5, type: 3}
+  thresholdA: 3
+  thresholdB: 5
+  thresholdC: 7
+

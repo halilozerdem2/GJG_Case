@@ -6,7 +6,7 @@ using UnityEngine.SceneManagement;
 public class MainMenuCanvasController : MonoBehaviour
 {
     [SerializeField] private int caseSceneIndex = 1;
-    [SerializeField] private int playSceneIndex = 2;
+    [SerializeField] private int playSceneIndex = 1;
     [Header("Game Mode Selection")]
     [SerializeField] private TMP_Dropdown gameModeDropdown;
     [SerializeField] private float invalidModePulseScale = 1.1f;
@@ -29,7 +29,8 @@ public class MainMenuCanvasController : MonoBehaviour
     public void GoToCaseScene()
     {
         SetExplicitGameMode(GameManager.GameMode.Case);
-        LoadScene(caseSceneIndex);
+        // Redirect to Game Scene instead of Case scene
+        LoadScene(playSceneIndex);
     }
 
     public void GoToPlayScene()
@@ -40,44 +41,8 @@ public class MainMenuCanvasController : MonoBehaviour
 
     public void HandlePlayButtonClicked()
     {
-        pendingSceneBuildIndex = -1;
-
-        if (gameModeDropdown == null)
-        {
-            LoadScene(playSceneIndex);
-            return;
-        }
-
-        int selection = Mathf.Clamp(gameModeDropdown.value, 0, modeSceneBuildIndices.Length - 1);
-        if (selection <= 0 || selection >= modeSceneBuildIndices.Length)
-        {
-            PulseInvalidDropdown();
-            return;
-        }
-
-        int targetScene = modeSceneBuildIndices[selection];
-        if (targetScene < 0)
-        {
-            PulseInvalidDropdown();
-            return;
-        }
-
-        if (selection == 1)
-        {
-            if (difficultySelectionPanel == null)
-            {
-                ApplyGameModeFromSelection(selection);
-                LoadScene(targetScene);
-                return;
-            }
-
-            pendingSceneBuildIndex = targetScene;
-            ShowDifficultyPanel();
-            return;
-        }
-
-        ApplyGameModeFromSelection(selection);
-        LoadScene(targetScene);
+        // Ignore dropdown/game mode; directly load the play scene
+        LoadScene(playSceneIndex);
     }
 
     private void LoadScene(int buildIndex)

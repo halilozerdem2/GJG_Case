@@ -219,13 +219,14 @@ public class LevelCanvasManager : MonoBehaviour
     public void GoToCaseScene()
     {
         SetGameMode(GameManager.GameMode.Case);
+        // Redirect to Game Scene at build index 1
         LoadSceneByIndex(1);
     }
 
     public void GoToPlayScene()
     {
         SetGameMode(GameManager.GameMode.Easy);
-        LoadSceneByIndex(2);
+        LoadSceneByIndex(1);
     }
 
     private void SyncToggleStates()
