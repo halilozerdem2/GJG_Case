@@ -39,6 +39,7 @@ public class GameManager : MonoBehaviour
     private float maxTime;
     private Coroutine limitTimerRoutine;
     private bool objectivesComplete = true;
+    private int currentLevelNumber = 1;
 
     public GameMode CurrentGameMode => _currentGameMode;
     public bool IsCaseMode => _currentGameMode == GameMode.Case;
@@ -55,6 +56,7 @@ public class GameManager : MonoBehaviour
     public float RemainingTime => remainingTime;
     public float TimeLimitSeconds => maxTime;
     public bool AreObjectivesComplete => objectivesComplete;
+    public int CurrentLevelNumber => Mathf.Max(1, currentLevelNumber);
 
     public event Action<GameMode> GameModeChanged;
     public event Action<int, int> MovesChanged;
@@ -458,6 +460,10 @@ public class GameManager : MonoBehaviour
         }
 
         ChangeState(GameState.Win);
+
+        // Compute stars based on resource usage and persist progress
+        int stars = CalculateStarsForWin();
+        ReportLevelCompleted(stars);
     }
 
     public void TriggerLoseState()
@@ -468,6 +474,16 @@ public class GameManager : MonoBehaviour
         }
 
         ChangeState(GameState.Lose);
+    }
+
+    public void SetActiveLevelConfig(GameModeConfig config)
+    {
+        _activeGameModeConfig = config;
+        if (gridManager != null && blockManager != null)
+        {
+            ApplyBoardSettingsToManagers();
+            ApplyLimitSettings();
+        }
     }
 
     private void BuildGameModeConfigLookup()
@@ -567,5 +583,45 @@ public class GameManager : MonoBehaviour
     {
         public GameMode mode;
         public GameModeConfig config;
+    }
+
+    public void SetCurrentLevelNumber(int levelNumber)
+    {
+        currentLevelNumber = Mathf.Max(1, levelNumber);
+    }
+
+    public void ReportLevelCompleted(int stars)
+    {
+        LevelProgressService.Instance.ReportLevelResult(CurrentLevelNumber, Mathf.Clamp(stars, 0, 3));
+    }
+
+    private int CalculateStarsForWin()
+    {
+        // Prefer move-based scoring when a move limit is active
+        if (useMoveLimit && maxMoves > 0)
+        {
+            int movesUsed = Mathf.Max(0, maxMoves - Mathf.Max(0, remainingMoves));
+            float usedRatio = Mathf.Clamp01(maxMoves > 0 ? (float)movesUsed / maxMoves : 1f);
+            return StarsFromUsageRatio(usedRatio);
+        }
+
+        // Fallback to time-based scoring when a time limit is active
+        if (useTimeLimit && maxTime > 0f)
+        {
+            float timeUsed = Mathf.Max(0f, maxTime - Mathf.Max(0f, remainingTime));
+            float usedRatio = Mathf.Clamp01(maxTime > 0f ? timeUsed / maxTime : 1f);
+            return StarsFromUsageRatio(usedRatio);
+        }
+
+        // No limits → award maximum by default
+        return 3;
+    }
+
+    private static int StarsFromUsageRatio(float usedRatio)
+    {
+        // 3★: <= 50% kaynak kullanımı, 2★: <= 80%, 1★: > 80%
+        if (usedRatio <= 0.5f) return 3;
+        if (usedRatio <= 0.8f) return 2;
+        return 1;
     }
 }
