@@ -26,13 +26,6 @@ public class MainMenuCanvasController : MonoBehaviour
         }
     }
 
-    public void GoToCaseScene()
-    {
-        SetExplicitGameMode(GameManager.GameMode.Case);
-        // Redirect to Game Scene instead of Case scene
-        LoadScene(playSceneIndex);
-    }
-
     public void GoToPlayScene()
     {
         SetExplicitGameMode(GameManager.GameMode.Easy);
@@ -111,21 +104,6 @@ public class MainMenuCanvasController : MonoBehaviour
         pendingSceneBuildIndex = -1;
     }
 
-    public void SelectEasyDifficulty()
-    {
-        ApplyDifficultySelection(GameManager.GameMode.Easy);
-    }
-
-    public void SelectMediumDifficulty()
-    {
-        ApplyDifficultySelection(GameManager.GameMode.Medium);
-    }
-
-    public void SelectHardDifficulty()
-    {
-        ApplyDifficultySelection(GameManager.GameMode.Hard);
-    }
-
     private void ApplyDifficultySelection(GameManager.GameMode mode)
     {
         var gameManager = GameManager.Instance;
@@ -150,5 +128,14 @@ public class MainMenuCanvasController : MonoBehaviour
         }
 
         gameManager.SetGameMode(mode);
+    }
+
+    public void Quit()
+    {
+#if UNITY_EDITOR
+        UnityEditor.EditorApplication.isPlaying = false;
+#else
+        Application.Quit();
+#endif
     }
 }

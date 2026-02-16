@@ -14,19 +14,9 @@ public class GameManager : MonoBehaviour
     [SerializeField] private int vSyncCount = 0;
     [SerializeField] private string mainMenuSceneName = "MainMenu";
     [SerializeField] private GameMode startupMode = GameMode.Game;
-    [SerializeField] private List<GameModeConfigBinding> gameModeConfigs = new List<GameModeConfigBinding>();
-    private static readonly Dictionary<GameMode, string> ModeResourcePaths = new Dictionary<GameMode, string>
-    {
-        { GameMode.Game, "Level Configurations/Objects/GameModeConfig" },
-        { GameMode.Case, "Level Configurations/Case Scene Configurations/GameModeConfig" },
-        { GameMode.Easy, "Level Configurations/Easy Config/GameModeConfig" },
-        { GameMode.Medium, "Level Configurations/Medium Config/GameModeConfig" },
-        { GameMode.Hard, "Level Configurations/Hard Config/GameModeConfig" }
-    };
 
     private GameState _state;
     private GameMode _currentGameMode = GameMode.Game;
-    private readonly Dictionary<GameMode, GameModeConfig> _configLookup = new Dictionary<GameMode, GameModeConfig>();
     private GameModeConfig _activeGameModeConfig;
     private static readonly GameModeConfig.PowerupCooldownEntry[] EmptyPowerupCooldowns = Array.Empty<GameModeConfig.PowerupCooldownEntry>();
     private static readonly GameModeConfig.SpecialBlockThreshold[] EmptySpecialThresholds = Array.Empty<GameModeConfig.SpecialBlockThreshold>();
@@ -38,6 +28,8 @@ public class GameManager : MonoBehaviour
     private float remainingTime;
     private float maxTime;
     private Coroutine limitTimerRoutine;
+    private bool nearFailTimeRaised;
+    private bool nearFailMovesRaised;
     private bool objectivesComplete = true;
     private int currentLevelNumber = 1;
 
@@ -74,7 +66,6 @@ public class GameManager : MonoBehaviour
         Instance = this;
         DontDestroyOnLoad(gameObject);
         _currentGameMode = startupMode;
-        BuildGameModeConfigLookup();
         ResolveActiveGameModeConfig(_currentGameMode);
         ApplyPerformanceSettings();
         SceneManager.sceneLoaded += HandleSceneLoaded;
@@ -96,6 +87,7 @@ public class GameManager : MonoBehaviour
 
     private void ChangeState(GameState newState)
     {
+        var previous = _state;
         if (IsTerminalGameState(_state))
         {
             return;
@@ -106,6 +98,7 @@ public class GameManager : MonoBehaviour
         switch (newState)
         {
             case GameState.GenerateLevel:
+                GameEventBus.RaiseLevelStart();
                 gridManager.InitializeGrid();
                 blockManager.Initialize(gridManager);
                 ChangeState(GameState.SpawningBlocks);
@@ -114,19 +107,31 @@ public class GameManager : MonoBehaviour
                 blockManager.SpawnBlocks(HandleBlocksSpawned);
                 break;
             case GameState.WaitingInput:
+                if (previous == GameState.Falling)
+                {
+                    GameEventBus.RaiseCascadeEnded();
+                }
+                else if (previous == GameState.SpawningBlocks)
+                {
+                    GameEventBus.RaiseBoardRefillComplete();
+                }
                 break;
             case GameState.Falling:
+                GameEventBus.RaiseCascadeStarted();
                 blockManager.ResolveFalling();
                 ChangeState(GameState.SpawningBlocks);
                 break;
             case GameState.Deadlock:
+                GameEventBus.RaiseDeadlock();
                 blockManager.ResolveDeadlock(HandleDeadlockResolved);
                 break;
             case GameState.Win:
+                GameEventBus.RaiseLevelEnd(LevelEndResult.Win);
                 StopLimitTimer();
                 WinLosePanelController.ActiveInstance?.ShowWinPanel();
                 break;
             case GameState.Lose:
+                GameEventBus.RaiseLevelEnd(LevelEndResult.Lose);
                 StopLimitTimer();
                 WinLosePanelController.ActiveInstance?.ShowLosePanel();
                 break;
@@ -183,6 +188,7 @@ public class GameManager : MonoBehaviour
 
         if (blockManager.TryHandleBlockSelection(block))
         {
+            GameEventBus.RaiseMoveCommitted();
             ConsumeMoveIfNeeded();
             ChangeState(GameState.Falling);
         }
@@ -365,6 +371,9 @@ public class GameManager : MonoBehaviour
 
         objectivesComplete = true;
 
+        nearFailTimeRaised = false;
+        nearFailMovesRaised = false;
+
         if (useTimeLimit && maxTime > 0f)
         {
             limitTimerRoutine = StartCoroutine(LimitTimer());
@@ -383,6 +392,17 @@ public class GameManager : MonoBehaviour
 
             remainingTime = Mathf.Max(0f, remainingTime - Time.deltaTime);
             TimeChanged?.Invoke(remainingTime, maxTime);
+
+            // Near-fail on time used >= 80%
+            if (!nearFailTimeRaised && maxTime > 0f)
+            {
+                float usedRatio = 1f - (remainingTime / maxTime);
+                if (usedRatio >= 0.8f)
+                {
+                    nearFailTimeRaised = true;
+                    GameEventBus.RaiseNearFail();
+                }
+            }
 
             if (remainingTime <= 0f)
             {
@@ -425,6 +445,18 @@ public class GameManager : MonoBehaviour
 
         remainingMoves = Mathf.Max(0, remainingMoves - 1);
         MovesChanged?.Invoke(remainingMoves, maxMoves);
+
+        // Near-fail on moves used >= 90%
+        if (!nearFailMovesRaised && maxMoves > 0)
+        {
+            int used = Mathf.Max(0, maxMoves - remainingMoves);
+            float usedRatio = (float)used / maxMoves;
+            if (usedRatio >= 0.9f)
+            {
+                nearFailMovesRaised = true;
+                GameEventBus.RaiseNearFail();
+            }
+        }
 
         if (remainingMoves > 0)
         {
@@ -486,47 +518,19 @@ public class GameManager : MonoBehaviour
         }
     }
 
-    private void BuildGameModeConfigLookup()
-    {
-        _configLookup.Clear();
-        if (gameModeConfigs == null)
-        {
-            return;
-        }
-
-        for (int i = 0; i < gameModeConfigs.Count; i++)
-        {
-            GameModeConfigBinding entry = gameModeConfigs[i];
-            if (entry.config == null)
-            {
-                continue;
-            }
-
-            if (_configLookup.ContainsKey(entry.mode))
-            {
-                Debug.LogWarning($"Duplicate GameModeConfig assignment detected for mode {entry.mode}. Using the first entry only.");
-                continue;
-            }
-
-            _configLookup[entry.mode] = entry.config;
-        }
-    }
-
     private void ResolveActiveGameModeConfig(GameMode mode)
     {
-        GameModeConfig config = LoadConfigFromResources(mode);
-        if (config == null)
-        {
-            if (_configLookup.Count == 0)
-            {
-                BuildGameModeConfigLookup();
-            }
+        GameModeConfig config = null;
 
-            _configLookup.TryGetValue(mode, out config);
-        }
-        else
+        // Prefer per-level config under Resources/Levels/Level_XX/GameModeConfig
+        if (mode != GameMode.Case && CurrentLevelNumber > 0)
         {
-            _configLookup[mode] = config;
+            string levelPath = $"Levels/Level_{CurrentLevelNumber:D2}/GameModeConfig";
+            config = Resources.Load<GameModeConfig>(levelPath);
+            if (config == null)
+            {
+                Debug.LogWarning($"Unable to load per-level GameModeConfig at Resources/{levelPath}.");
+            }
         }
 
         _activeGameModeConfig = config;
@@ -537,22 +541,6 @@ public class GameManager : MonoBehaviour
         }
 
         ApplyBoardSettingsToManagers();
-    }
-
-    private GameModeConfig LoadConfigFromResources(GameMode mode)
-    {
-        if (!ModeResourcePaths.TryGetValue(mode, out string resourcePath) || string.IsNullOrEmpty(resourcePath))
-        {
-            return null;
-        }
-
-        GameModeConfig config = Resources.Load<GameModeConfig>(resourcePath);
-        if (config == null)
-        {
-            Debug.LogWarning($"Unable to load GameModeConfig for mode {mode} at Resources/{resourcePath}.");
-        }
-
-        return config;
     }
 
     private void ApplyBoardSettingsToManagers()
@@ -576,13 +564,6 @@ public class GameManager : MonoBehaviour
     private static bool IsTerminalGameState(GameState state)
     {
         return state == GameState.Win || state == GameState.Lose;
-    }
-
-    [Serializable]
-    private struct GameModeConfigBinding
-    {
-        public GameMode mode;
-        public GameModeConfig config;
     }
 
     public void SetCurrentLevelNumber(int levelNumber)

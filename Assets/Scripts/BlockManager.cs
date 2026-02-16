@@ -56,6 +56,8 @@ public class BlockManager : MonoBehaviour
     private readonly HashSet<int> pendingStaticRemovalIndices = new HashSet<int>();
     private readonly HashSet<int> staticPlacementIndexLookup = new HashSet<int>();
     private readonly Dictionary<int, StaticTargetInfo> staticTargetInfos = new Dictionary<int, StaticTargetInfo>();
+    private bool objectiveAlmostDoneRaised;
+    private int staticRemovedCountThisResolve;
     private readonly List<int> staticTargetKeyBuffer = new List<int>(8);
     private readonly Dictionary<Block.BlockArchetype, Queue<ParticleSystem>> specialEffectPools = new Dictionary<Block.BlockArchetype, Queue<ParticleSystem>>();
     private readonly Dictionary<Block.BlockArchetype, ParticleSystem> specialEffectPrefabs = new Dictionary<Block.BlockArchetype, ParticleSystem>();
@@ -83,6 +85,7 @@ public class BlockManager : MonoBehaviour
     private bool specialEffectLookupInitialized;
     private bool staticTargetsSpawned;
     private int totalStaticTargetCount;
+    
 
     private BoardSettings Settings => boardSettings != null ? boardSettings : gridManager?.BoardSettings;
     private AudioManager Audio => audioManager != null ? audioManager : AudioManager.Instance;
@@ -137,6 +140,7 @@ public class BlockManager : MonoBehaviour
         pendingStaticRemovalIndices.Clear();
         staticTargetsSpawned = false;
         totalStaticTargetCount = 0;
+        objectiveAlmostDoneRaised = false;
         ResetStaticTargetData();
         ConfigureBoardModel();
         EnsureGroupBuffers();
@@ -254,8 +258,10 @@ public class BlockManager : MonoBehaviour
         }
 
         origin?.HandleBlastResult(context);
+
         bool cleared = ClearBlocksForContext(context, nodeGrid, allowStaticAdjacency);
 
+        // Preserve original spawn flow to avoid occupancy conflicts.
         if (cleared && allowSpecialSpawn)
         {
             TrySpawnSpecialBlock(context, originNode);
@@ -279,6 +285,7 @@ public class BlockManager : MonoBehaviour
         }
 
         bool clearedAny = false;
+        staticRemovedCountThisResolve = 0;
         processedClearIndices.Clear();
         pendingChainGroups.Clear();
 
@@ -363,6 +370,7 @@ public class BlockManager : MonoBehaviour
                         continue;
                     }
 
+                    // Remove from grid/model and release with effect (original behavior)
                     targetNode.OccupiedBlock = null;
                     if (gridManager != null)
                     {
@@ -417,10 +425,17 @@ public class BlockManager : MonoBehaviour
                 CollectAdjacentStaticBlocks(indices, groupCount);
             }
             ReleaseChainBuffer(indices);
+
         }
 
         processedClearIndices.Clear();
         pendingChainGroups.Clear();
+
+        if (staticRemovedCountThisResolve >= 4)
+        {
+            GameEventBus.RaiseBigCombo(staticRemovedCountThisResolve);
+        }
+
         return clearedAny;
     }
 
@@ -1349,6 +1364,8 @@ public class BlockManager : MonoBehaviour
         info.Remaining = Mathf.Max(0, info.Remaining - 1);
         staticTargetInfos[blockType] = info;
         NotifyStaticTargetProgress(blockType, info);
+
+        CheckObjectiveAlmostDoneProgress();
     }
 
     private void NotifyStaticTargetProgress(int blockType, StaticTargetInfo info)
@@ -2419,10 +2436,45 @@ public class BlockManager : MonoBehaviour
             ReleaseBlock(staticBlock);
             UnregisterStaticTarget(staticBlock.blockType);
             StaticBlockCollected?.Invoke(staticBlock.blockType, worldPosition);
+            staticRemovedCountThisResolve++;
         }
 
         ClearModelCell(index);
         staticTargetIndices.Remove(index);
+    }
+
+    private void CheckObjectiveAlmostDoneProgress()
+    {
+        if (objectiveAlmostDoneRaised)
+        {
+            return;
+        }
+
+        if (staticTargetInfos == null || staticTargetInfos.Count == 0)
+        {
+            return;
+        }
+
+        int total = 0;
+        int remaining = 0;
+        foreach (var kvp in staticTargetInfos)
+        {
+            total += Mathf.Max(0, kvp.Value.Total);
+            remaining += Mathf.Max(0, kvp.Value.Remaining);
+        }
+
+        if (total <= 0)
+        {
+            return;
+        }
+
+        int collected = Mathf.Max(0, total - remaining);
+        float ratio = (float)collected / total;
+        if (ratio >= 0.9f)
+        {
+            objectiveAlmostDoneRaised = true;
+            GameEventBus.RaiseObjectiveAlmostDone();
+        }
     }
 
     private void AnimateSpecialSpawn(Block block)
@@ -2475,6 +2527,8 @@ public class BlockManager : MonoBehaviour
                 .SetTarget(target);
         }
     }
+
+    
 
     private void RequireFullBoardRefresh()
     {
@@ -3191,6 +3245,8 @@ public class BlockManager : MonoBehaviour
         public AnimationType type;
         public Action onComplete;
     }
+
+    
 
     private bool TryGuaranteeMove(Node[,] nodeGrid, BoardSettings settings)
     {

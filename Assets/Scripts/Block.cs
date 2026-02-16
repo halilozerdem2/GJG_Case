@@ -212,6 +212,7 @@ public abstract class Block : MonoBehaviour
             return;
         }
 
+        GameEventBus.RaiseMoveInputStarted();
         HandleSelection();
     }
 
