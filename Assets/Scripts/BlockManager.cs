@@ -22,6 +22,8 @@ public class BlockManager : MonoBehaviour
     [SerializeField] private Vector3 invalidGroupShakeStrength = new Vector3(0.1f, 0.1f, 0f);
     [SerializeField, Range(0f, 1f)] private float shuffleScaleDipRatio = 0.4f;
     [SerializeField] private float shuffleScaleDipAmount = 0.9f;
+    [SerializeField] private float specialMergeTravelDuration = 0.22f;
+    [SerializeField, Range(0.1f, 2f)] private float specialMergeScaleMultiplier = 0.8f;
     [SerializeField] private List<SpecialActivationEffectEntry> specialActivationEffects = new List<SpecialActivationEffectEntry>();
 
     private static readonly ProfilerMarker FallingMarker = new ProfilerMarker("BlockManager.ResolveFalling");
@@ -62,6 +64,7 @@ public class BlockManager : MonoBehaviour
     private readonly Dictionary<Block.BlockArchetype, Queue<ParticleSystem>> specialEffectPools = new Dictionary<Block.BlockArchetype, Queue<ParticleSystem>>();
     private readonly Dictionary<Block.BlockArchetype, ParticleSystem> specialEffectPrefabs = new Dictionary<Block.BlockArchetype, ParticleSystem>();
     private readonly Dictionary<int, ParticleSystem> staticBlastPrefabs = new Dictionary<int, ParticleSystem>();
+    private readonly SpecialMergeSequence specialMergeSequence = new SpecialMergeSequence();
     private BoardModel boardModel = new BoardModel();
     private int[] bfsQueue;
     private int[] groupIndicesBuffer;
@@ -85,6 +88,8 @@ public class BlockManager : MonoBehaviour
     private bool specialEffectLookupInitialized;
     private bool staticTargetsSpawned;
     private int totalStaticTargetCount;
+    private bool blastAnimationPending;
+    private Action blastAnimationCompletion;
     
 
     private BoardSettings Settings => boardSettings != null ? boardSettings : gridManager?.BoardSettings;
@@ -94,6 +99,7 @@ public class BlockManager : MonoBehaviour
     public BoardModel BoardModel => boardModel;
     public int TotalStaticTargetCount => totalStaticTargetCount;
     public int RemainingStaticTargetCount => staticTargetIndices.Count;
+    public bool HasPendingBlastAnimations => blastAnimationPending;
     public bool TryGetStaticTargetProgress(int blockType, out int collected, out int total)
     {
         if (staticTargetInfos.TryGetValue(blockType, out StaticTargetInfo info))
@@ -141,6 +147,8 @@ public class BlockManager : MonoBehaviour
         staticTargetsSpawned = false;
         totalStaticTargetCount = 0;
         objectiveAlmostDoneRaised = false;
+        blastAnimationPending = false;
+        blastAnimationCompletion = null;
         ResetStaticTargetData();
         ConfigureBoardModel();
         EnsureGroupBuffers();
@@ -221,6 +229,22 @@ public class BlockManager : MonoBehaviour
         return ExecuteBlast(groupContext, originNode, true, false, true);
     }
 
+    public void WaitForBlastAnimations(Action onComplete)
+    {
+        if (onComplete == null)
+        {
+            return;
+        }
+
+        if (!blastAnimationPending)
+        {
+            onComplete();
+            return;
+        }
+
+        blastAnimationCompletion += onComplete;
+    }
+
     private bool TryExecuteSpecialBlock(Block block)
     {
         if (!TryBuildSearchData(block, out BlockSearchData searchData))
@@ -259,18 +283,41 @@ public class BlockManager : MonoBehaviour
 
         origin?.HandleBlastResult(context);
 
-        bool cleared = ClearBlocksForContext(context, nodeGrid, allowStaticAdjacency);
+        bool shouldSpawnSpecial = false;
+        Block.BlockArchetype resolvedArchetype = Block.BlockArchetype.Regular;
+        int resolvedBlockType = context.BlockType;
+        SpecialMergeSequence mergeSequence = null;
+
+        if (allowSpecialSpawn && originNode != null && TryResolveSpecialBlockSpawn(context, out resolvedArchetype, out resolvedBlockType))
+        {
+            shouldSpawnSpecial = true;
+            mergeSequence = PrepareSpecialMergeSequence(originNode);
+        }
+
+        bool cleared = ClearBlocksForContext(context, nodeGrid, allowStaticAdjacency, mergeSequence);
+        MarkBlastAnimationPending(mergeSequence);
+
+        if (mergeSequence != null && !mergeSequence.WasTriggered)
+        {
+            mergeSequence.Reset();
+            mergeSequence = null;
+        }
 
         // Preserve original spawn flow to avoid occupancy conflicts.
-        if (cleared && allowSpecialSpawn)
+        if (cleared && shouldSpawnSpecial)
         {
-            TrySpawnSpecialBlock(context, originNode);
+            TrySpawnSpecialBlock(context, originNode, resolvedArchetype, resolvedBlockType, mergeSequence);
+        }
+        else if (mergeSequence != null)
+        {
+            mergeSequence.Reset();
         }
 
         return cleared;
     }
 
-    private bool ClearBlocksForContext(GroupContext context, Node[,] nodeGrid, bool allowStaticAdjacency)
+    private bool ClearBlocksForContext(GroupContext context, Node[,] nodeGrid, bool allowStaticAdjacency,
+        SpecialMergeSequence mergeSequence = null)
     {
         if (boardModel == null || nodeGrid == null || context.Indices == null)
         {
@@ -291,6 +338,8 @@ public class BlockManager : MonoBehaviour
 
         int limit = Mathf.Min(context.GroupSize, context.Indices.Length);
         EnqueueChainGroup(context.Indices, limit, allowStaticAdjacency);
+
+        bool mergeApplied = false;
 
         while (pendingChainGroups.Count > 0)
         {
@@ -337,6 +386,8 @@ public class BlockManager : MonoBehaviour
                 EnqueueChainGroup(specialSearch.ResultBuffer, specialCount, false);
             }
 
+            bool useMergeAnimation = !mergeApplied && mergeSequence != null;
+
             // Phase 2: clear current group's regular blocks first.
             for (int i = 0; i < groupCount; i++)
             {
@@ -376,8 +427,17 @@ public class BlockManager : MonoBehaviour
                     {
                         gridManager.FreeNodes.Add(targetNode);
                     }
-                    PlayBlockBlastEffect(member);
-                    ReleaseBlock(member);
+                    member.node = null;
+                    if (useMergeAnimation)
+                    {
+                        AnimateBlockMerge(member, mergeSequence);
+                        mergeApplied = true;
+                    }
+                    else
+                    {
+                        PlayBlockBlastEffect(member);
+                        ReleaseBlock(member);
+                    }
                     clearedAny = true;
                 }
                 else if (gridManager != null)
@@ -439,28 +499,36 @@ public class BlockManager : MonoBehaviour
         return clearedAny;
     }
 
-    private void TrySpawnSpecialBlock(GroupContext context, Node originNode)
+    private void TrySpawnSpecialBlock(GroupContext context, Node originNode, Block.BlockArchetype archetype,
+        int blockType, SpecialMergeSequence mergeSequence)
     {
         if (originNode == null || originNode.OccupiedBlock != null)
         {
+            ForceCompleteBlastAnimation(mergeSequence);
+            mergeSequence?.Reset();
             return;
         }
 
-        if (!TryResolveSpecialBlockSpawn(context, out Block.BlockArchetype archetype, out int blockType))
-        {
-            return;
-        }
-
-        Block spawned = SpawnBlockOfType(blockType, originNode, archetype);
+        bool animateImmediately = mergeSequence == null || !mergeSequence.WasTriggered;
+        Block spawned = SpawnBlockOfType(blockType, originNode, archetype, animateImmediately);
         if (spawned == null)
         {
             Debug.LogWarning($"Failed to spawn special block {archetype} for block type {blockType}. Ensure prefab is registered in GameModeConfig.");
+            ForceCompleteBlastAnimation(mergeSequence);
+            mergeSequence?.Reset();
             return;
         }
 
         if (spawned is ColorClearBlock colorClear)
         {
             colorClear.ConfigureTargetColor(context.BlockType);
+        }
+
+        if (mergeSequence != null && mergeSequence.WasTriggered)
+        {
+            PrepareHiddenSpecialBlock(spawned);
+            mergeSequence.PendingSpecialBlock = spawned;
+            TryFinalizeSpecialMergeSequence(mergeSequence);
         }
     }
 
@@ -1007,6 +1075,11 @@ public class BlockManager : MonoBehaviour
             {
                 Node node = GetNodeFromIndex(index);
                 if (node == null)
+                {
+                    continue;
+                }
+
+                if (node.OccupiedBlock != null)
                 {
                     continue;
                 }
@@ -1623,6 +1696,111 @@ public class BlockManager : MonoBehaviour
         StartBlockAnimation(block.transform, targetScale, duration, ease, AnimationType.Scale, null);
     }
 
+    private void MarkBlastAnimationPending(SpecialMergeSequence sequence)
+    {
+        if (sequence == null || !sequence.WasTriggered)
+        {
+            return;
+        }
+
+        blastAnimationPending = true;
+    }
+
+    private void ForceCompleteBlastAnimation(SpecialMergeSequence sequence)
+    {
+        if (sequence == null || !sequence.WasTriggered)
+        {
+            return;
+        }
+
+        NotifyBlastAnimationsComplete();
+    }
+
+    private void NotifyBlastAnimationsComplete()
+    {
+        if (!blastAnimationPending && blastAnimationCompletion == null)
+        {
+            return;
+        }
+
+        blastAnimationPending = false;
+        Action completion = blastAnimationCompletion;
+        blastAnimationCompletion = null;
+        completion?.Invoke();
+    }
+
+    private SpecialMergeSequence PrepareSpecialMergeSequence(Node originNode)
+    {
+        if (originNode == null)
+        {
+            return null;
+        }
+
+        Vector3 target = originNode.transform.localPosition;
+        specialMergeSequence.Prepare(target);
+        return specialMergeSequence;
+    }
+
+    private void AnimateBlockMerge(Block block, SpecialMergeSequence sequence)
+    {
+        if (block == null || sequence == null)
+        {
+            return;
+        }
+
+        sequence.RegisterBlock();
+        Transform target = block.transform;
+        target.SetAsLastSibling();
+        float duration = Mathf.Max(0f, specialMergeTravelDuration);
+        Vector3 destination = sequence.TargetLocalPosition;
+
+        if (duration <= 0f)
+        {
+            target.localPosition = destination;
+            CompleteMergeBlock(block, sequence);
+            return;
+        }
+
+        StartBlockAnimation(target, destination, duration, AnimationEase.OutCubic, AnimationType.Position, () =>
+        {
+            CompleteMergeBlock(block, sequence);
+        });
+
+        float scaleMultiplier = Mathf.Clamp(specialMergeScaleMultiplier, 0.05f, 5f);
+        Vector3 scaleTarget = block.BaseLocalScale * scaleMultiplier;
+        StartBlockAnimation(target, scaleTarget, duration, AnimationEase.OutSine, AnimationType.Scale, null);
+    }
+
+    private void CompleteMergeBlock(Block block, SpecialMergeSequence sequence)
+    {
+        PlayBlockBlastEffect(block);
+        ReleaseBlock(block);
+        sequence.OnMemberCompleted();
+        TryFinalizeSpecialMergeSequence(sequence);
+    }
+
+    private void TryFinalizeSpecialMergeSequence(SpecialMergeSequence sequence)
+    {
+        if (sequence == null)
+        {
+            return;
+        }
+
+        if (sequence.PendingBlocks > 0)
+        {
+            return;
+        }
+
+        if (sequence.PendingSpecialBlock != null && sequence.AnimationsComplete)
+        {
+            Block block = sequence.PendingSpecialBlock;
+            sequence.PendingSpecialBlock = null;
+            AnimateSpecialSpawn(block);
+            sequence.Reset();
+            NotifyBlastAnimationsComplete();
+        }
+    }
+
     private void AnimateShuffleBlock(Block block, Node node, float duration)
     {
         if (block == null || node == null)
@@ -2122,7 +2300,8 @@ public class BlockManager : MonoBehaviour
         return true;
     }
 
-    private Block SpawnBlockOfType(int blockType, Node targetNode, Block.BlockArchetype archetype = Block.BlockArchetype.Regular)
+    private Block SpawnBlockOfType(int blockType, Node targetNode,
+        Block.BlockArchetype archetype = Block.BlockArchetype.Regular, bool animateSpecialSpawn = true)
     {
         if (targetNode == null)
         {
@@ -2139,11 +2318,47 @@ public class BlockManager : MonoBehaviour
         SetModelCell(targetNode.gridPosition, blockType);
         SnapBlockToNode(spawned, targetNode);
         gridManager?.FreeNodes.Remove(targetNode);
+        RemovePendingSpawnIndex(boardModel?.Index(targetNode.gridPosition.x, targetNode.gridPosition.y) ?? -1);
         if (spawned.IsSpecialVariant)
         {
-            AnimateSpecialSpawn(spawned);
+            if (animateSpecialSpawn)
+            {
+                AnimateSpecialSpawn(spawned);
+            }
+            else
+            {
+                PrepareHiddenSpecialBlock(spawned);
+            }
         }
         return spawned;
+    }
+
+    private void PrepareHiddenSpecialBlock(Block block)
+    {
+        if (block == null)
+        {
+            return;
+        }
+
+        Transform target = block.transform;
+        DOTween.Kill(target);
+        target.localScale = Vector3.zero;
+    }
+
+    private void RemovePendingSpawnIndex(int index)
+    {
+        if (index < 0 || pendingSpawnIndices.Count == 0)
+        {
+            return;
+        }
+
+        for (int i = pendingSpawnIndices.Count - 1; i >= 0; i--)
+        {
+            if (pendingSpawnIndices[i] == index)
+            {
+                pendingSpawnIndices.RemoveAt(i);
+            }
+        }
     }
 
     private void SpawnStaticTargetsIfNeeded()
@@ -3225,6 +3440,49 @@ public class BlockManager : MonoBehaviour
         OutBounce,
         OutBack,
         OutSine
+    }
+
+    private sealed class SpecialMergeSequence
+    {
+        public bool WasTriggered { get; private set; }
+        public bool AnimationsComplete { get; private set; }
+        public int PendingBlocks { get; private set; }
+        public Vector3 TargetLocalPosition { get; private set; }
+        public Block PendingSpecialBlock { get; set; }
+
+        public void Prepare(Vector3 target)
+        {
+            TargetLocalPosition = target;
+            PendingSpecialBlock = null;
+            PendingBlocks = 0;
+            WasTriggered = false;
+            AnimationsComplete = false;
+        }
+
+        public void RegisterBlock()
+        {
+            WasTriggered = true;
+            PendingBlocks++;
+            AnimationsComplete = false;
+        }
+
+        public void OnMemberCompleted()
+        {
+            PendingBlocks = Mathf.Max(0, PendingBlocks - 1);
+            if (PendingBlocks == 0)
+            {
+                AnimationsComplete = true;
+            }
+        }
+
+        public void Reset()
+        {
+            TargetLocalPosition = Vector3.zero;
+            PendingSpecialBlock = null;
+            PendingBlocks = 0;
+            WasTriggered = false;
+            AnimationsComplete = false;
+        }
     }
 
     private struct BlockMove

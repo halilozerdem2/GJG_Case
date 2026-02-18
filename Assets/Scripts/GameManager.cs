@@ -116,6 +116,8 @@ public class GameManager : MonoBehaviour
                     GameEventBus.RaiseBoardRefillComplete();
                 }
                 break;
+            case GameState.BlastAnimation:
+                break;
             case GameState.Falling:
                 GameEventBus.RaiseCascadeStarted();
                 blockManager.ResolveFalling();
@@ -190,7 +192,11 @@ public class GameManager : MonoBehaviour
         {
             GameEventBus.RaiseMoveCommitted();
             ConsumeMoveIfNeeded();
-            ChangeState(GameState.Falling);
+            ChangeState(GameState.BlastAnimation);
+            blockManager.WaitForBlastAnimations(() =>
+            {
+                ChangeState(GameState.Falling);
+            });
         }
     }
 
@@ -250,6 +256,7 @@ public class GameManager : MonoBehaviour
         GenerateLevel,
         SpawningBlocks,
         WaitingInput,
+        BlastAnimation,
         Falling,
         Deadlock,
         Win,
