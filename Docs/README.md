@@ -53,7 +53,7 @@ Ek olarak stüdyo brief’inde istenmeyen eksikleri kapatmak için şunlar geli�
 - **Time/Move Sayaçları:** Limitler `Time.unscaledDeltaTime` ile takip edildiği için pause/state değişimlerinde clock drift oluşmaz. Coroutineler (limit timer, animasyonlar) mümkün olduğunca kısa tutulup `StopCoroutine` ile temizlenir.
 - **TargetCollectionAnimator:** Dünya→UI dönüşümleri, overlay canvas’ta bile Camera referansı doğru seçilerek yapılır. `indicatorPool` queue’su ile animasyon objeleri tekrar kullanılır; DOTween yerine sade `Coroutine` ve `AnimationCurve` ile GPU/CPU maliyeti düşük tutulur.
 - **Cache Friendly Veri Yapıları:** `GridManager` node referanslarını hem 2D `Node[,]` hem de 1D `allNodes` dizisinde tutar; blast ve shuffle gibi sıcak yollar `allNodes[i]` ile branchsiz çalışır. Special block spawn lookup’larında `Dictionary<Block.BlockArchetype, Queue<ParticleSystem>>` gibi küçük dictionary’ler sadece setup aşamasında doldurulur.
-- **Profiling & Guards:** Kod boyunca `ProfilerMarker` kullanıldı (`BlockManager.ResolveFalling`, `BlockManager.SpawnBlocks` vs) ve kritik fonksiyonlar guard clause ile null kontrollerini minimal maliyetle yapıyor.
+- **Profiling & Guards:** Kritik fonksiyonlar guard clause ile null kontrollerini minimal maliyetle yapıyor; performans analizi Unity Profiler/Timeline ve gerektiğinde Deep Profile yakalamalarıyla yapılıyor.
 
 ## 8. Testing Scenarios
 - Easy/Medium/Hard modlarının hepsinde hedef toplama + win akışını kontrol edin.

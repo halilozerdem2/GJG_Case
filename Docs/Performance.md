@@ -3,7 +3,7 @@
 ## CPU / GC optimizasyonları
 - **BoardModel merkezli hesap:** `BlockManager` tüm taramaları tek boyutlu `Cell[]` üzerinde yürüttüğü için komşu aramaları `index = x + y * columns` formülüne indirgenir, LINQ veya `List<Node>` taramaları kullanılmaz.
 - **Buffer yeniden kullanımı:** Flood-fill, shuffle ve ikon yenileme işlemleri için ayrılan `bfsQueue`, `groupIndicesBuffer`, `visitedStamps`, `dirtyIndices` gibi diziler board boyutu kadar allocate edilir; her çağrıda `Array.Clear` yerine damgalama (`visitStamp`, `groupEvaluationStamp`) uygulanır ve GC alloc oluşmaz.
-- **Gravity & falling:** `ResolveFalling` her kolonu yukarıdan aşağıya tek geçişte sıkıştırır, hareket eden blokları `blockMoves` listesinde toplar ve düşüş animasyonlarını tek seferde tetikler. Bu akış için `ProfilerMarker` kullanıldığı için mobil hedefte CPU bütçesi kolay izlenir.
+- **Gravity & falling:** `ResolveFalling` her kolonu yukarıdan aşağıya tek geçişte sıkıştırır, hareket eden blokları `blockMoves` listesinde toplar ve düşüş animasyonlarını tek seferde tetikler; mobil hedefte CPU bütçesini Unity Profiler Timeline + Deep Profile yakalamalarıyla izlemek kolaydır.
 - **Limit sayaçları:** `GameManager` zaman ve hamle sınırlarını event tabanlı günceller; coroutine yalnızca zaman limiti aktifken çalışır ve `Time.unscaledDeltaTime` kullanıldığı için pause durumunda CPU israfı olmaz.
 
 ## Object pooling

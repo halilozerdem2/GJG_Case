@@ -12,9 +12,6 @@ public class GameModeConfig : ScriptableObject
     [SerializeField] private List<SpecialBlockThreshold> specialBlockThresholds = new List<SpecialBlockThreshold>();
     [SerializeField] private List<StaticTargetSpawn> staticTargetSpawns = new List<StaticTargetSpawn>();
     [SerializeField] private List<SpecialBlockPrefab> specialBlockPrefabs = new List<SpecialBlockPrefab>();
-    [Header("Interventions")]
-    [SerializeField] private InterventionLevelConfig interventionConfig;
-    [SerializeField] private InterventionStrategySet interventionStrategies;
 
     private static readonly PowerupCooldownEntry[] EmptyPowerupCooldowns = Array.Empty<PowerupCooldownEntry>();
     private static readonly SpecialBlockThreshold[] EmptySpecialBlockThresholds = Array.Empty<SpecialBlockThreshold>();
@@ -28,8 +25,6 @@ public class GameModeConfig : ScriptableObject
     public IReadOnlyList<SpecialBlockThreshold> SpecialBlockThresholds => specialBlockThresholds != null ? specialBlockThresholds : (IReadOnlyList<SpecialBlockThreshold>)EmptySpecialBlockThresholds;
     public IReadOnlyList<StaticTargetSpawn> StaticTargetSpawns => staticTargetSpawns != null ? staticTargetSpawns : (IReadOnlyList<StaticTargetSpawn>)EmptyStaticTargets;
     public IReadOnlyList<SpecialBlockPrefab> SpecialBlockPrefabs => specialBlockPrefabs != null ? specialBlockPrefabs : (IReadOnlyList<SpecialBlockPrefab>)EmptySpecialBlockPrefabs;
-    public InterventionLevelConfig InterventionConfig => interventionConfig;
-    public InterventionStrategySet InterventionStrategies => interventionStrategies;
 
     public bool TryGetPowerupCooldown(PowerupType type, out float cooldownSeconds)
     {

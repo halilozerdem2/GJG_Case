@@ -42,4 +42,3 @@ public enum LevelEndResult
     Win,
     Lose
 }
-

@@ -27,4 +27,4 @@
 - **BoardSettings guard:** `BoardSettingsPlaymodeValidator` play mode'a girerken tüm BoardSettings asset'lerini doğrular; bir tanesi bile limitleri ihlal ederse otomatik olarak Play Mode iptal edilir ve geliştirici uyarılır.
 - **GameModeConfig editörü:** `GameModeConfigEditor` özel inspector ile statik hedef maskelerini görsel olarak düzenleme (grid toggle) imkânı verir, tek tuşla alanı doldurma/temizleme sağlar.
 - **BoardRegeneratorUI:** Case sahnesinde tasarımcıların satır, sütun ve A/B/C eşiklerini canlı olarak güncelleyip board'u tekrar üretmesini sağlar; kuralları ihlal eden girişlerde uyarı label'ını DOTween ile pulse'lar.
-- **Profiler marker ağı:** `BlockManager` (spawn, falling, shuffle), `ObjectPool`, vb. yoğun fonksiyonlar `Unity.Profiling.ProfilerMarker` ile işaretlendiğinden Editor Profiler timeline'ında hangi aşamanın tükettiği hemen okunabilir.
+- **Profiler gözlemi:** Spawn/falling/shuffle gibi pahalı akışlar Unity Profiler Timeline'ında takip edilir, gerektiğinde Deep Profile kullanılır ve `BlockManager` log'ları deadlock/shuffle analizinde referans sağlar.

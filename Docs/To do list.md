@@ -95,7 +95,7 @@
   - Replace dictionaries with arrays/lists wherever indices suffice (node grids, views, cells).
   - Pre-size lists and reuse buffers; avoid LINQ/yield patterns in hot loops to prevent hidden allocations.
 - [x] **Instrumentation & Regression Safety**
-  - Add `ProfilerMarker`s for `GroupDetection`, `IconTierUpdate`, `GravityCompaction`, `Refill`, and `DeadlockCheck`.
+  - Temiz build'lerde per-metot `ProfilerMarker` kullanımını kaldır, ihtiyaç halinde Unity Profiler oturumlarıyla aynı akışları ölç.
   - Add an editor/playmode config validator that blocks play when `M/N` or `K` are out of bounds, thresholds `A/B/C` are invalid, or sprite tiers are missing.
 
 ## Phase 3 — Game Mode Feature Set & Special Blocks
