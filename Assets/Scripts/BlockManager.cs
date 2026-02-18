@@ -65,6 +65,7 @@ public class BlockManager : MonoBehaviour
     private readonly Dictionary<Block.BlockArchetype, ParticleSystem> specialEffectPrefabs = new Dictionary<Block.BlockArchetype, ParticleSystem>();
     private readonly Dictionary<int, ParticleSystem> staticBlastPrefabs = new Dictionary<int, ParticleSystem>();
     private readonly SpecialMergeSequence specialMergeSequence = new SpecialMergeSequence();
+    private readonly ColorClearSequence colorClearSequence = new ColorClearSequence();
     private BoardModel boardModel = new BoardModel();
     private int[] bfsQueue;
     private int[] groupIndicesBuffer;
@@ -89,6 +90,7 @@ public class BlockManager : MonoBehaviour
     private bool staticTargetsSpawned;
     private int totalStaticTargetCount;
     private bool blastAnimationPending;
+    private bool awaitingColorClearResolution;
     private Action blastAnimationCompletion;
     
 
@@ -149,6 +151,7 @@ public class BlockManager : MonoBehaviour
         objectiveAlmostDoneRaised = false;
         blastAnimationPending = false;
         blastAnimationCompletion = null;
+        awaitingColorClearResolution = false;
         ResetStaticTargetData();
         ConfigureBoardModel();
         EnsureGroupBuffers();
@@ -275,6 +278,16 @@ public class BlockManager : MonoBehaviour
             return false;
         }
 
+        ColorClearBlock colorClearOrigin = context.Origin as ColorClearBlock;
+        if (colorClearOrigin != null)
+        {
+            colorClearSequence.Prepare(this, colorClearOrigin);
+        }
+        else
+        {
+            colorClearSequence.Reset();
+        }
+
         Block origin = context.Origin;
         if (activateSpecial)
         {
@@ -335,10 +348,29 @@ public class BlockManager : MonoBehaviour
         staticRemovedCountThisResolve = 0;
         processedClearIndices.Clear();
         pendingChainGroups.Clear();
+        awaitingColorClearResolution = false;
 
         int limit = Mathf.Min(context.GroupSize, context.Indices.Length);
         EnqueueChainGroup(context.Indices, limit, allowStaticAdjacency);
 
+        bool suspended = ProcessPendingChainGroups(nodeGrid, mergeSequence, ref clearedAny);
+        if (!suspended)
+        {
+            FinalizeChainProcessing();
+        }
+
+        return clearedAny;
+    }
+
+    private bool ProcessPendingChainGroups(Node[,] nodeGrid, SpecialMergeSequence mergeSequence, ref bool clearedAny)
+    {
+        if (boardModel == null || nodeGrid == null)
+        {
+            return false;
+        }
+
+        int columns = boardModel.Columns;
+        int rows = boardModel.Rows;
         bool mergeApplied = false;
 
         while (pendingChainGroups.Count > 0)
@@ -350,6 +382,20 @@ public class BlockManager : MonoBehaviour
             if (indices == null || groupCount <= 0)
             {
                 ReleaseChainBuffer(indices);
+                continue;
+            }
+
+            if (colorClearSequence.ShouldCaptureNextGroup)
+            {
+                bool started = colorClearSequence.TryCaptureGroup(group, nodeGrid);
+                if (started)
+                {
+                    clearedAny = true;
+                    blastAnimationPending = true;
+                    awaitingColorClearResolution = true;
+                    return true;
+                }
+
                 continue;
             }
 
@@ -421,7 +467,6 @@ public class BlockManager : MonoBehaviour
                         continue;
                     }
 
-                    // Remove from grid/model and release with effect (original behavior)
                     targetNode.OccupiedBlock = null;
                     if (gridManager != null)
                     {
@@ -484,19 +529,125 @@ public class BlockManager : MonoBehaviour
             {
                 CollectAdjacentStaticBlocks(indices, groupCount);
             }
-            ReleaseChainBuffer(indices);
 
+            ReleaseChainBuffer(indices);
         }
 
-        processedClearIndices.Clear();
+        return false;
+    }
+
+    private void FinalizeChainProcessing()
+    {
+        pendingSpecialClears.Clear();
         pendingChainGroups.Clear();
+        processedClearIndices.Clear();
 
         if (staticRemovedCountThisResolve >= 4)
         {
             GameEventBus.RaiseBigCombo(staticRemovedCountThisResolve);
         }
 
-        return clearedAny;
+        staticRemovedCountThisResolve = 0;
+    }
+
+    private void HandleColorClearSequenceFinished()
+    {
+        awaitingColorClearResolution = false;
+        Node[,] nodeGrid = gridManager != null ? gridManager.NodeGrid : null;
+        bool resumedClear = false;
+        bool suspended = ProcessPendingChainGroups(nodeGrid, null, ref resumedClear);
+        if (!suspended)
+        {
+            FinalizeChainProcessing();
+            NotifyBlastAnimationsComplete();
+        }
+    }
+
+    private void ResolveColorClearTarget(ColorClearTarget target)
+    {
+        Node targetNode = target.Node;
+        Block block = target.Block;
+        if (block is StaticBlock)
+        {
+            RemoveStaticBlockAt(target.ModelIndex);
+            if (target.SpecialChain.Indices != null)
+            {
+                ReleaseChainBuffer(target.SpecialChain.Indices);
+            }
+            return;
+        }
+
+        if (block != null)
+        {
+            if (targetNode != null && targetNode.OccupiedBlock == block)
+            {
+                targetNode.OccupiedBlock = null;
+                if (gridManager != null)
+                {
+                    gridManager.FreeNodes.Add(targetNode);
+                }
+            }
+
+            block.node = null;
+            PlayBlockBlastEffect(block);
+            ReleaseBlock(block);
+        }
+        else if (targetNode != null && gridManager != null)
+        {
+            gridManager.FreeNodes.Add(targetNode);
+        }
+
+        if (target.ModelIndex >= 0)
+        {
+            ClearModelCell(target.ModelIndex);
+        }
+
+        if (block != null && target.SpecialChain.Count > 0 && target.SpecialChain.Indices != null)
+        {
+            TriggerSpecialActivationFeedback(block);
+            EnqueueChainGroup(target.SpecialChain.Indices, target.SpecialChain.Count, false);
+        }
+
+        if (target.SpecialChain.Indices != null)
+        {
+            ReleaseChainBuffer(target.SpecialChain.Indices);
+        }
+    }
+
+    private void ResolveColorClearOrigin(ColorClearBlock emitter, Node node, int modelIndex)
+    {
+        if (emitter == null)
+        {
+            return;
+        }
+
+        Node referenceNode = node != null ? node : emitter.node;
+        Vector2Int gridPosition = referenceNode != null ? referenceNode.gridPosition : Vector2Int.zero;
+        bool hasGrid = referenceNode != null || emitter.node != null;
+
+        if (referenceNode != null && referenceNode.OccupiedBlock == emitter)
+        {
+            referenceNode.OccupiedBlock = null;
+            if (gridManager != null)
+            {
+                gridManager.FreeNodes.Add(referenceNode);
+            }
+        }
+
+        emitter.node = null;
+
+        if (modelIndex < 0 && boardModel != null && hasGrid)
+        {
+            modelIndex = boardModel.Index(gridPosition.x, gridPosition.y);
+        }
+
+        if (modelIndex >= 0)
+        {
+            ClearModelCell(modelIndex);
+        }
+
+        PlayBlockBlastEffect(emitter);
+        ReleaseBlock(emitter);
     }
 
     private void TrySpawnSpecialBlock(GroupContext context, Node originNode, Block.BlockArchetype archetype,
@@ -3440,6 +3591,268 @@ public class BlockManager : MonoBehaviour
         OutBounce,
         OutBack,
         OutSine
+    }
+
+    private struct ColorClearTarget
+    {
+        public Block Block;
+        public Node Node;
+        public int ModelIndex;
+        public Vector3 WorldPosition;
+        public SpecialChainData SpecialChain;
+    }
+
+    private struct SpecialChainData
+    {
+        public int[] Indices;
+        public int Count;
+    }
+
+    private sealed class ColorClearSequence
+    {
+        private readonly List<ColorClearTarget> targets = new List<ColorClearTarget>(32);
+        private readonly Dictionary<Block, SpecialChainData> pendingSpecialChains = new Dictionary<Block, SpecialChainData>();
+        private BlockManager owner;
+        private ColorClearBlock emitter;
+        private Node emitterNode;
+        private int emitterModelIndex = -1;
+        private int[] rootGroupBuffer;
+        private int rootGroupCount;
+        private bool rootAllowStaticAdjacent;
+        private bool primaryGroupCaptured;
+        private Color beamColor = Color.white;
+        private float beamSpeed = 12f;
+        private float beamCompletionDelay;
+        private float beamWidth = 0.2f;
+
+        public bool ShouldCaptureNextGroup => emitter != null && !primaryGroupCaptured;
+
+        public void Prepare(BlockManager manager, ColorClearBlock origin)
+        {
+            owner = manager;
+            emitter = origin;
+            emitterNode = origin != null ? origin.node : null;
+            emitterModelIndex = -1;
+            rootGroupBuffer = null;
+            rootGroupCount = 0;
+            rootAllowStaticAdjacent = false;
+            primaryGroupCaptured = false;
+            targets.Clear();
+            pendingSpecialChains.Clear();
+
+            if (origin != null)
+            {
+                beamColor = origin.BeamColor;
+                beamSpeed = Mathf.Max(0.01f, origin.BeamTravelSpeed);
+                beamCompletionDelay = origin.BeamCompletionDelay;
+                beamWidth = Mathf.Max(0.01f, origin.BeamLineWidth);
+            }
+        }
+
+        public void Reset()
+        {
+            ReleaseRootBuffer();
+            foreach (var entry in pendingSpecialChains)
+            {
+                if (entry.Value.Indices != null)
+                {
+                    owner?.ReleaseChainBuffer(entry.Value.Indices);
+                }
+            }
+            pendingSpecialChains.Clear();
+            targets.Clear();
+            emitter = null;
+            emitterNode = null;
+            emitterModelIndex = -1;
+            rootGroupCount = 0;
+            rootAllowStaticAdjacent = false;
+            primaryGroupCaptured = false;
+        }
+
+        public bool TryCaptureGroup(ChainClearGroup group, Node[,] nodeGrid)
+        {
+            if (owner == null || emitter == null)
+            {
+                owner?.ReleaseChainBuffer(group.Indices);
+                return false;
+            }
+
+            primaryGroupCaptured = true;
+            rootGroupBuffer = group.Indices;
+            rootGroupCount = group.Count;
+            rootAllowStaticAdjacent = group.AllowStaticAdjacent;
+
+            BoardModel board = owner.boardModel;
+            if (board == null || nodeGrid == null)
+            {
+                ReleaseRootBuffer();
+                return false;
+            }
+
+            int columns = board.Columns;
+            int rows = board.Rows;
+            bool hasTargets = false;
+
+            for (int i = 0; i < group.Count; i++)
+            {
+                int memberIndex = group.Indices[i];
+                int x = columns > 0 ? memberIndex % columns : board.X(memberIndex);
+                int y = columns > 0 ? memberIndex / columns : board.Y(memberIndex);
+                if (x < 0 || x >= columns || y < 0 || y >= rows)
+                {
+                    continue;
+                }
+
+                Node node = nodeGrid[x, y];
+                Block member = node != null ? node.OccupiedBlock : null;
+                if (member == null)
+                {
+                    continue;
+                }
+
+                if (member == emitter)
+                {
+                    emitterNode = node;
+                    emitterModelIndex = memberIndex;
+                    continue;
+                }
+
+                if (!member.IsSpecialVariant || member.Archetype == Block.BlockArchetype.Static)
+                {
+                    continue;
+                }
+
+                if (!owner.TryBuildSearchData(member, out BlockSearchData specialSearch))
+                {
+                    continue;
+                }
+
+                int specialCount = member.GatherSearchResults(specialSearch);
+                if (specialCount <= 0)
+                {
+                    continue;
+                }
+
+                int[] buffer = owner.AcquireChainBuffer(specialCount);
+                Array.Copy(specialSearch.ResultBuffer, buffer, specialCount);
+                pendingSpecialChains[member] = new SpecialChainData
+                {
+                    Indices = buffer,
+                    Count = specialCount
+                };
+            }
+
+            for (int i = 0; i < group.Count; i++)
+            {
+                int memberIndex = group.Indices[i];
+                int x = columns > 0 ? memberIndex % columns : board.X(memberIndex);
+                int y = columns > 0 ? memberIndex / columns : board.Y(memberIndex);
+                if (x < 0 || x >= columns || y < 0 || y >= rows)
+                {
+                    continue;
+                }
+
+                Node node = nodeGrid[x, y];
+                Block member = node != null ? node.OccupiedBlock : null;
+                if (member == null || member == emitter)
+                {
+                    continue;
+                }
+
+                SpecialChainData chainData = default;
+                if (pendingSpecialChains.TryGetValue(member, out SpecialChainData stored))
+                {
+                    chainData = stored;
+                    pendingSpecialChains.Remove(member);
+                }
+
+                targets.Add(new ColorClearTarget
+                {
+                    Block = member,
+                    Node = node,
+                    ModelIndex = memberIndex,
+                    WorldPosition = node.transform.position,
+                    SpecialChain = chainData
+                });
+                hasTargets = true;
+            }
+
+            foreach (var entry in pendingSpecialChains)
+            {
+                owner.ReleaseChainBuffer(entry.Value.Indices);
+            }
+            pendingSpecialChains.Clear();
+
+            if (!hasTargets)
+            {
+                owner.ResolveColorClearOrigin(emitter, emitterNode, emitterModelIndex);
+                ReleaseRootBuffer();
+                Reset();
+                return false;
+            }
+
+            owner.StartCoroutine(PlaySequence());
+            return true;
+        }
+
+        private IEnumerator PlaySequence()
+        {
+            Transform effectRoot = owner.GetBlastEffectRoot();
+            Vector3 start = emitter != null ? emitter.transform.position : Vector3.zero;
+            int pendingHits = targets.Count;
+            if (pendingHits <= 0)
+            {
+                CompleteSequence();
+                yield break;
+            }
+
+            WaitForSeconds completionDelay = beamCompletionDelay > 0f ? new WaitForSeconds(beamCompletionDelay) : null;
+
+            for (int i = 0; i < targets.Count; i++)
+            {
+                ColorClearTarget capturedTarget = targets[i];
+                ColorClearLineEffect effect = ColorClearLineEffect.Create(effectRoot);
+                effect.Play(start, capturedTarget.WorldPosition, beamColor, beamWidth, beamSpeed, () =>
+                {
+                    owner.ResolveColorClearTarget(capturedTarget);
+                    pendingHits = Mathf.Max(0, pendingHits - 1);
+                });
+            }
+
+            while (pendingHits > 0)
+            {
+                yield return null;
+            }
+
+            if (completionDelay != null)
+            {
+                yield return completionDelay;
+            }
+
+            CompleteSequence();
+        }
+
+        private void CompleteSequence()
+        {
+            owner.ResolveColorClearOrigin(emitter, emitterNode, emitterModelIndex);
+            if (rootAllowStaticAdjacent && rootGroupBuffer != null)
+            {
+                owner.CollectAdjacentStaticBlocks(rootGroupBuffer, rootGroupCount);
+            }
+
+            ReleaseRootBuffer();
+            owner.HandleColorClearSequenceFinished();
+            Reset();
+        }
+
+        private void ReleaseRootBuffer()
+        {
+            if (rootGroupBuffer != null)
+            {
+                owner?.ReleaseChainBuffer(rootGroupBuffer);
+                rootGroupBuffer = null;
+            }
+        }
     }
 
     private sealed class SpecialMergeSequence

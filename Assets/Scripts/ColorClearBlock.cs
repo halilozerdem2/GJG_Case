@@ -1,5 +1,6 @@
 using System;
 using UnityEngine;
+using UnityEngine.Serialization;
 
 public class ColorClearBlock : SpecialBlock
 {
@@ -12,14 +13,35 @@ public class ColorClearBlock : SpecialBlock
 
     [SerializeField] private ColorVariant[] variantIcons = Array.Empty<ColorVariant>();
     [SerializeField] private float rotationSpeed = 180f;
+    [Header("Beam Settings")]
+    [SerializeField] private Color beamColor = Color.white;
+    [SerializeField] private float beamTravelSpeed = 15f;
+    [FormerlySerializedAs("beamDelayBetweenTargets")]
+    [SerializeField] private float beamCompletionDelay = 0.05f;
+    [SerializeField] private float beamLineWidth = 0.1f;
 
     private byte targetColorId = BoardModel.EmptyColorId;
     private int mappedVariantBlockType = -1;
+    private static readonly Color32[] BeamColorLookup =
+    {
+        new Color32(64, 138, 255, 255),
+        new Color32(76, 219, 143, 255),
+        new Color32(255, 120, 198, 255),
+        new Color32(181, 99, 255, 255),
+        new Color32(255, 97, 97, 255),
+        new Color32(255, 214, 96, 255)
+    };
+
+    public Color BeamColor => beamColor;
+    public float BeamTravelSpeed => Mathf.Max(0.01f, beamTravelSpeed);
+    public float BeamCompletionDelay => Mathf.Max(0f, beamCompletionDelay);
+    public float BeamLineWidth => Mathf.Max(0.01f, beamLineWidth);
 
     public void ConfigureTargetColor(int sourceBlockType)
     {
         targetColorId = (byte)Mathf.Clamp(sourceBlockType, 0, byte.MaxValue);
         ApplyVariantSprite(sourceBlockType);
+        ApplyBeamAppearance(targetColorId);
     }
 
     public override int GatherSearchResults(BlockSearchData searchData)
@@ -40,6 +62,8 @@ public class ColorClearBlock : SpecialBlock
         {
             count = GatherColorResults(searchData, targetColor);
         }
+
+        ApplyBeamAppearance(targetColor);
 
         bool startMatchesTarget = startCell.occupied && startCell.colorId == targetColor;
         if (!startMatchesTarget && count < buffer.Length)
@@ -95,5 +119,16 @@ public class ColorClearBlock : SpecialBlock
         }
 
         transform.Rotate(0f, 0f, rotationSpeed * Time.deltaTime);
+    }
+
+    private void ApplyBeamAppearance(byte colorId)
+    {
+        if (colorId == BoardModel.EmptyColorId || BeamColorLookup == null || BeamColorLookup.Length == 0)
+        {
+            return;
+        }
+
+        int index = Mathf.Clamp(colorId, 0, BeamColorLookup.Length - 1);
+        beamColor = BeamColorLookup[index];
     }
 }

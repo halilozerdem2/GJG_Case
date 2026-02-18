@@ -173,3 +173,7 @@ MonoBehaviour:
   - blockType: 5
     icon: {fileID: -7601994034151040684, guid: 00644dc4a01194362bd82c47de697df4, type: 3}
   rotationSpeed: 200
+  beamColor: {r: 1, g: 1, b: 1, a: 1}
+  beamTravelSpeed: 15
+  beamCompletionDelay: 0.05
+  beamLineWidth: 0.1
