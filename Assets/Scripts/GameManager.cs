@@ -37,6 +37,7 @@ public class GameManager : MonoBehaviour
     public bool IsCaseMode => _currentGameMode == GameMode.Case;
     public bool IsGameMode => _currentGameMode != GameMode.Case;
     public GameModeConfig ActiveGameModeConfig => _activeGameModeConfig;
+    public BlockManager BlockManager => blockManager;
     public GameModeConfig.MoveTimeLimitSettings ActiveLimitSettings => _activeGameModeConfig != null ? _activeGameModeConfig.Limits : GameModeConfig.MoveTimeLimitSettings.Default;
     public IReadOnlyList<GameModeConfig.PowerupCooldownEntry> ActivePowerupCooldowns => _activeGameModeConfig != null ? _activeGameModeConfig.PowerupCooldowns : EmptyPowerupCooldowns;
     public IReadOnlyList<GameModeConfig.SpecialBlockThreshold> ActiveSpecialBlockThresholds => _activeGameModeConfig != null ? _activeGameModeConfig.SpecialBlockThresholds : EmptySpecialThresholds;
@@ -198,6 +199,16 @@ public class GameManager : MonoBehaviour
                 ChangeState(GameState.Falling);
             });
         }
+    }
+
+    public bool TrySwapBlocks(Block first, Block second)
+    {
+        if (!IsWaitingForInput || blockManager == null)
+        {
+            return false;
+        }
+
+        return blockManager.TrySwapBlocks(first, second);
     }
 
     public int GetMatchingNeighbours(Block block, List<Block> buffer)

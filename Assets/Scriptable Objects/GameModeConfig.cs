@@ -12,6 +12,7 @@ public class GameModeConfig : ScriptableObject
     [SerializeField] private List<SpecialBlockThreshold> specialBlockThresholds = new List<SpecialBlockThreshold>();
     [SerializeField] private List<StaticTargetSpawn> staticTargetSpawns = new List<StaticTargetSpawn>();
     [SerializeField] private List<SpecialBlockPrefab> specialBlockPrefabs = new List<SpecialBlockPrefab>();
+    [SerializeField] private LilManipulationSettings lilManipulation = LilManipulationSettings.Default;
 
     private static readonly PowerupCooldownEntry[] EmptyPowerupCooldowns = Array.Empty<PowerupCooldownEntry>();
     private static readonly SpecialBlockThreshold[] EmptySpecialBlockThresholds = Array.Empty<SpecialBlockThreshold>();
@@ -25,6 +26,7 @@ public class GameModeConfig : ScriptableObject
     public IReadOnlyList<SpecialBlockThreshold> SpecialBlockThresholds => specialBlockThresholds != null ? specialBlockThresholds : (IReadOnlyList<SpecialBlockThreshold>)EmptySpecialBlockThresholds;
     public IReadOnlyList<StaticTargetSpawn> StaticTargetSpawns => staticTargetSpawns != null ? staticTargetSpawns : (IReadOnlyList<StaticTargetSpawn>)EmptyStaticTargets;
     public IReadOnlyList<SpecialBlockPrefab> SpecialBlockPrefabs => specialBlockPrefabs != null ? specialBlockPrefabs : (IReadOnlyList<SpecialBlockPrefab>)EmptySpecialBlockPrefabs;
+    public LilManipulationSettings LilManipulation => lilManipulation;
 
     public bool TryGetPowerupCooldown(PowerupType type, out float cooldownSeconds)
     {
@@ -79,6 +81,7 @@ public class GameModeConfig : ScriptableObject
         EnsureList(ref specialBlockThresholds);
         EnsureList(ref staticTargetSpawns);
         EnsureList(ref specialBlockPrefabs);
+        lilManipulation.Clamp();
     }
 
     private void EnsureList<T>(ref List<T> list)
@@ -198,6 +201,39 @@ public class GameModeConfig : ScriptableObject
 
         public bool[] CustomCells => customCells;
         public bool IsValid => customCells != null && customCells.Length > 0;
+    }
+
+    [Serializable]
+    public struct LilManipulationSettings
+    {
+        private const float DefaultMinInterval = 15f;
+        private const float DefaultMaxInterval = 20f;
+        private const float DefaultDuration = 2f;
+
+        [SerializeField] private bool enableManipulation;
+        [SerializeField, Min(0f)] private float minIntervalSeconds;
+        [SerializeField, Min(0f)] private float maxIntervalSeconds;
+        [SerializeField, Min(0f)] private float manipulationStateDuration;
+
+        public static LilManipulationSettings Default => new LilManipulationSettings
+        {
+            enableManipulation = false,
+            minIntervalSeconds = DefaultMinInterval,
+            maxIntervalSeconds = DefaultMaxInterval,
+            manipulationStateDuration = DefaultDuration
+        };
+
+        public bool Enabled => enableManipulation;
+        public float MinIntervalSeconds => Mathf.Max(0f, minIntervalSeconds);
+        public float MaxIntervalSeconds => Mathf.Max(MinIntervalSeconds, maxIntervalSeconds);
+        public float ManipulationDurationSeconds => Mathf.Max(0f, manipulationStateDuration);
+
+        public void Clamp()
+        {
+            minIntervalSeconds = Mathf.Max(0f, minIntervalSeconds);
+            maxIntervalSeconds = Mathf.Max(minIntervalSeconds, maxIntervalSeconds);
+            manipulationStateDuration = Mathf.Max(0f, manipulationStateDuration);
+        }
     }
 
     [Serializable]

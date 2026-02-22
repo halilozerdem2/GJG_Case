@@ -24,6 +24,7 @@ public class AudioManager : MonoBehaviour
 
     [SerializeField] private AudioSource sfxSource;
     [SerializeField] private AudioSource musicSource;
+    [SerializeField] private AudioSource lilVoiceSource;
     [SerializeField] private List<BlockSfxEntry> blockSfxEntries = new List<BlockSfxEntry>();
     [SerializeField] private List<SceneMusicEntry> sceneMusicEntries = new List<SceneMusicEntry>();
     [SerializeField] private AudioClip invalidSelectionClip;
@@ -118,6 +119,30 @@ public class AudioManager : MonoBehaviour
         PlayOneShot(clip);
     }
 
+    public void PlayLilSpeech(AudioClip clip)
+    {
+        if (lilVoiceSource == null || clip == null || !sfxEnabled)
+        {
+            return;
+        }
+
+        lilVoiceSource.Stop();
+        lilVoiceSource.clip = clip;
+        lilVoiceSource.loop = false;
+        lilVoiceSource.Play();
+    }
+
+    public void StopLilSpeech()
+    {
+        if (lilVoiceSource == null)
+        {
+            return;
+        }
+
+        lilVoiceSource.Stop();
+        lilVoiceSource.clip = null;
+    }
+
     public void PlayWin()
     {
         PlayOneShot(winClip);
@@ -154,6 +179,11 @@ public class AudioManager : MonoBehaviour
         {
             sfxSource.mute = !enabled;
         }
+
+        if (lilVoiceSource != null)
+        {
+            lilVoiceSource.mute = !enabled;
+        }
     }
 
     public bool IsMusicEnabled => musicEnabled;
@@ -161,6 +191,7 @@ public class AudioManager : MonoBehaviour
     public AudioSource SfxSource => sfxSource;
     public AudioClip WinClip => winClip;
     public AudioClip LoseClip => loseClip;
+    public AudioSource LilVoiceSource => lilVoiceSource;
 
     public void PlaySceneMusic(string sceneName)
     {
@@ -282,6 +313,37 @@ public class AudioManager : MonoBehaviour
         {
             musicSource.mute = !musicEnabled;
         }
+
+        if (lilVoiceSource == null || lilVoiceSource == sfxSource)
+        {
+            lilVoiceSource = GetAdditionalAudioSource("LilVoiceSource");
+        }
+
+        if (lilVoiceSource != null)
+        {
+            lilVoiceSource.playOnAwake = false;
+            lilVoiceSource.loop = false;
+            lilVoiceSource.mute = !sfxEnabled;
+        }
+    }
+
+    private AudioSource GetAdditionalAudioSource(string objectName)
+    {
+        Transform holder = transform.Find(objectName);
+        GameObject target = holder != null ? holder.gameObject : null;
+        if (target == null)
+        {
+            target = new GameObject(objectName);
+            target.transform.SetParent(transform);
+        }
+
+        AudioSource source = target.GetComponent<AudioSource>();
+        if (source == null)
+        {
+            source = target.AddComponent<AudioSource>();
+        }
+
+        return source;
     }
 
     private void HandleSceneLoaded(Scene scene, LoadSceneMode mode)

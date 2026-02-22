@@ -159,6 +159,7 @@ MonoBehaviour:
   defaultIcon: {fileID: -7421532893031524118, guid: 34c2c43a7f73648068820abbb88d5da4, type: 3}
   baseLocalScale: {x: 0.39, y: 0.39, z: 0.37959903}
   staticBlastEffect: {fileID: 3788187274286152095, guid: 874f313bcab2e47a8b825cf7ba604f80, type: 3}
+  iceBlock: {fileID: 0}
 --- !u!1 &8782363497424556148
 GameObject:
   m_ObjectHideFlags: 0
@@ -239,7 +240,7 @@ SpriteRenderer:
   m_GlobalIlluminationMeshLod: 0
   m_SortingLayerID: 0
   m_SortingLayer: 0
-  m_SortingOrder: 3
+  m_SortingOrder: 8
   m_MaskInteraction: 0
   m_Sprite: {fileID: -7421532893031524118, guid: 34c2c43a7f73648068820abbb88d5da4, type: 3}
   m_Color: {r: 1, g: 1, b: 1, a: 1}

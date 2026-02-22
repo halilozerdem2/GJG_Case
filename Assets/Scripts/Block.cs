@@ -216,6 +216,11 @@ public abstract class Block : MonoBehaviour
         HandleSelection();
     }
 
+    public void HandleUserSelection()
+    {
+        HandleSelection();
+    }
+
     protected virtual void HandleSelection()
     {
         GameManager.Instance?.TryBlastBlock(this);

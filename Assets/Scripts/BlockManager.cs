@@ -25,6 +25,10 @@ public class BlockManager : MonoBehaviour
     [SerializeField] private float specialMergeTravelDuration = 0.22f;
     [SerializeField, Range(0.1f, 2f)] private float specialMergeScaleMultiplier = 0.8f;
     [SerializeField] private List<SpecialActivationEffectEntry> specialActivationEffects = new List<SpecialActivationEffectEntry>();
+    [SerializeField] private Color rocketLineFallbackColor = new Color(0.55f, 0.85f, 1f, 1f);
+    [SerializeField, Min(0.01f)] private float rocketLineWidth = 0.09f;
+    [SerializeField, Min(0.01f)] private float rocketLineTravelSpeed = 24f;
+    [SerializeField, Min(0.01f)] private float rocketLineFadeDuration = 0.15f;
 
     private static readonly ProfilerMarker FallingMarker = new ProfilerMarker("BlockManager.ResolveFalling");
     private static readonly ProfilerMarker SpawnBlocksMarker = new ProfilerMarker("BlockManager.SpawnBlocks");
@@ -45,6 +49,8 @@ public class BlockManager : MonoBehaviour
     private readonly List<Block> poolPrefabsBuffer = new List<Block>(32);
     private readonly List<Node> shuffleNodesBuffer = new List<Node>(64);
     private readonly List<Node> staticPlacementSlots = new List<Node>(64);
+    private readonly List<Node> manipulationCandidates = new List<Node>(32);
+    private readonly List<StaticBlock> staticManipulationPrefabs = new List<StaticBlock>(4);
     private readonly List<Node>[] shuffleColorBuckets = new List<Node>[MaxColorIds];
     private readonly bool[] shuffleColorUsage = new bool[MaxColorIds];
     private readonly int[] usedColorIds = new int[MaxColorIds];
@@ -61,6 +67,7 @@ public class BlockManager : MonoBehaviour
     private bool objectiveAlmostDoneRaised;
     private int staticRemovedCountThisResolve;
     private readonly List<int> staticTargetKeyBuffer = new List<int>(8);
+    private readonly int[] singleStaticIndexBuffer = new int[1];
     private readonly Dictionary<Block.BlockArchetype, Queue<ParticleSystem>> specialEffectPools = new Dictionary<Block.BlockArchetype, Queue<ParticleSystem>>();
     private readonly Dictionary<Block.BlockArchetype, ParticleSystem> specialEffectPrefabs = new Dictionary<Block.BlockArchetype, ParticleSystem>();
     private readonly Dictionary<int, ParticleSystem> staticBlastPrefabs = new Dictionary<int, ParticleSystem>();
@@ -289,9 +296,11 @@ public class BlockManager : MonoBehaviour
         }
 
         Block origin = context.Origin;
-        if (activateSpecial)
+        if (activateSpecial && origin != null)
         {
-            origin?.ActivateSpecialEffect(context);
+            origin.ActivateSpecialEffect(context);
+            TryPlayRocketLineEffect(origin);
+            CollectStaticTargetsAdjacentToNode(origin.node);
         }
 
         origin?.HandleBlastResult(context);
@@ -600,6 +609,7 @@ public class BlockManager : MonoBehaviour
         if (target.ModelIndex >= 0)
         {
             ClearModelCell(target.ModelIndex);
+            CollectAdjacentStaticAtIndex(target.ModelIndex);
         }
 
         if (block != null && target.SpecialChain.Count > 0 && target.SpecialChain.Indices != null)
@@ -1119,10 +1129,6 @@ public class BlockManager : MonoBehaviour
 
             if (block is StaticBlock)
             {
-                if (TryRemoveStaticBlock(node))
-                {
-                    anyDestroyed = true;
-                }
                 continue;
             }
 
@@ -1132,6 +1138,7 @@ public class BlockManager : MonoBehaviour
             if (node != null)
             {
                 ClearModelCell(node.gridPosition);
+                CollectStaticTargetsAdjacentToNode(node);
             }
             anyDestroyed = true;
         }
@@ -1166,10 +1173,6 @@ public class BlockManager : MonoBehaviour
 
             if (block is StaticBlock)
             {
-                if (TryRemoveStaticBlock(node))
-                {
-                    destroyedAny = true;
-                }
                 continue;
             }
 
@@ -1179,6 +1182,7 @@ public class BlockManager : MonoBehaviour
             if (node != null)
             {
                 ClearModelCell(node.gridPosition);
+                CollectStaticTargetsAdjacentToNode(node);
             }
             destroyedAny = true;
         }
@@ -1191,6 +1195,112 @@ public class BlockManager : MonoBehaviour
         gridManager.UpdateFreeNodes();
         RefreshGroupVisuals();
         return true;
+    }
+
+    public void RestoreAllStaticIce()
+    {
+        Node[,] nodeGrid = gridManager?.NodeGrid;
+        if (nodeGrid == null)
+        {
+            return;
+        }
+
+        foreach (Node node in nodeGrid)
+        {
+            if (node?.OccupiedBlock is StaticBlock staticBlock)
+            {
+                staticBlock.ResetIce();
+            }
+        }
+    }
+
+    public int ConvertRandomBlocksToStaticTargets(int count)
+    {
+        if (count <= 0 || gridManager == null)
+        {
+            return 0;
+        }
+
+        Node[,] nodeGrid = gridManager.NodeGrid;
+        if (nodeGrid == null)
+        {
+            return 0;
+        }
+
+        GameModeConfig config = GameManager.Instance != null ? GameManager.Instance.ActiveGameModeConfig : null;
+        if (config == null)
+        {
+            return 0;
+        }
+
+        var staticConfigs = config.StaticTargetSpawns;
+        staticManipulationPrefabs.Clear();
+        for (int i = 0; i < staticConfigs.Count; i++)
+        {
+            if (staticConfigs[i].TargetPrefab is StaticBlock staticPrefab)
+            {
+                staticManipulationPrefabs.Add(staticPrefab);
+            }
+        }
+
+        if (staticManipulationPrefabs.Count == 0)
+        {
+            return 0;
+        }
+
+        manipulationCandidates.Clear();
+        foreach (Node node in nodeGrid)
+        {
+            if (node == null || IsNodeLocked(node))
+            {
+                continue;
+            }
+
+            Block occupant = node.OccupiedBlock;
+            if (occupant == null || occupant is StaticBlock || !(occupant is RegularBlock))
+            {
+                continue;
+            }
+
+            manipulationCandidates.Add(node);
+        }
+
+        if (manipulationCandidates.Count == 0)
+        {
+            return 0;
+        }
+
+        int applied = 0;
+        int required = Mathf.Min(count, manipulationCandidates.Count);
+        for (int i = 0; i < required; i++)
+        {
+            int candidateIndex = Random.Range(i, manipulationCandidates.Count);
+            Node targetNode = manipulationCandidates[candidateIndex];
+            manipulationCandidates[candidateIndex] = manipulationCandidates[i];
+            manipulationCandidates[i] = targetNode;
+
+            StaticBlock prefab = staticManipulationPrefabs[Random.Range(0, staticManipulationPrefabs.Count)];
+            ReplaceNodeWithStatic(targetNode, prefab, true);
+            applied++;
+        }
+
+        manipulationCandidates.Clear();
+        return applied;
+    }
+
+    private static bool IsRocketBlock(Block block)
+    {
+        return block != null && (block.Archetype == Block.BlockArchetype.RowClear || block.Archetype == Block.BlockArchetype.ColumnClear);
+    }
+
+    private static bool IsBombBlock(Block block)
+    {
+        return block is BombBlock;
+    }
+
+    public bool TrySwapBlocks(Block first, Block second)
+    {
+        return false;
     }
 
     private IEnumerator SpawnBlocksCoroutine(Action<bool> onCompleted)
@@ -1621,6 +1731,8 @@ public class BlockManager : MonoBehaviour
 
         Audio?.PlayBlockSfx(block.blockType);
         PlaySpecialActivationEffect(block);
+        TryPlayRocketLineEffect(block);
+        CollectStaticTargetsAdjacentToNode(block.node);
     }
 
     private void PlaySpecialActivationEffect(Block block)
@@ -1650,6 +1762,120 @@ public class BlockManager : MonoBehaviour
         effect.gameObject.SetActive(true);
         effect.Play(true);
         StartCoroutine(ReturnSpecialEffect(block.Archetype, effect));
+    }
+
+    private void TryPlayRocketLineEffect(Block block)
+    {
+        if (block == null || gridManager == null)
+        {
+            return;
+        }
+
+        if (block.Archetype != Block.BlockArchetype.ColumnClear && block.Archetype != Block.BlockArchetype.RowClear)
+        {
+            return;
+        }
+
+        Node originNode = block.node;
+        Node[,] nodeGrid = gridManager.NodeGrid;
+        if (originNode == null || nodeGrid == null)
+        {
+            return;
+        }
+
+        int columns = nodeGrid.GetLength(0);
+        int rows = nodeGrid.GetLength(1);
+        if (columns <= 0 || rows <= 0)
+        {
+            return;
+        }
+
+        Vector3 start = block.transform.position;
+        Vector3 targetA = start;
+        Vector3 targetB = start;
+
+        if (block.Archetype == Block.BlockArchetype.ColumnClear)
+        {
+            int column = Mathf.Clamp(originNode.gridPosition.x, 0, columns - 1);
+            targetA = GetNodePositionOrFallback(nodeGrid, columns, rows, column, 0, start);
+            targetB = GetNodePositionOrFallback(nodeGrid, columns, rows, column, rows - 1, start);
+        }
+        else
+        {
+            int row = Mathf.Clamp(originNode.gridPosition.y, 0, rows - 1);
+            targetA = GetNodePositionOrFallback(nodeGrid, columns, rows, 0, row, start);
+            targetB = GetNodePositionOrFallback(nodeGrid, columns, rows, columns - 1, row, start);
+        }
+
+        RocketLineEffect effect = RocketLineEffect.Create(GetBlastEffectRoot());
+        Color effectColor = ResolveRocketLineColor(block);
+        effect.Play(start, targetA, targetB, effectColor, rocketLineWidth, rocketLineTravelSpeed, rocketLineFadeDuration);
+    }
+
+    private static Vector3 GetNodePositionOrFallback(Node[,] nodeGrid, int columns, int rows, int x, int y, Vector3 fallback)
+    {
+        if (nodeGrid == null || columns <= 0 || rows <= 0)
+        {
+            return fallback;
+        }
+
+        if (x < 0 || x >= columns || y < 0 || y >= rows)
+        {
+            return fallback;
+        }
+
+        Node node = nodeGrid[x, y];
+        return node != null ? node.transform.position : fallback;
+    }
+
+    private Color ResolveRocketLineColor(Block block)
+    {
+        Color fallback = rocketLineFallbackColor;
+        if (fallback.a <= 0f)
+        {
+            fallback.a = 1f;
+        }
+
+        if (block == null)
+        {
+            return fallback;
+        }
+
+        SpriteRenderer renderer = block.GetComponent<SpriteRenderer>();
+        if (renderer == null)
+        {
+            return fallback;
+        }
+
+        Color tint = renderer.color;
+        if (tint.a <= 0f)
+        {
+            tint.a = fallback.a;
+        }
+
+        return tint;
+    }
+
+    private void CollectStaticTargetsAdjacentToNode(Node node)
+    {
+        if (node == null || boardModel == null)
+        {
+            return;
+        }
+
+        int index = boardModel.Index(node.gridPosition.x, node.gridPosition.y);
+        CollectAdjacentStaticAtIndex(index);
+    }
+
+    private void CollectAdjacentStaticAtIndex(int index)
+    {
+        if (index < 0)
+        {
+            return;
+        }
+
+        singleStaticIndexBuffer[0] = index;
+        CollectAdjacentStaticBlocks(singleStaticIndexBuffer, 1);
     }
 
     private void EnsureSpecialEffectLookup()
@@ -2568,7 +2794,7 @@ public class BlockManager : MonoBehaviour
         }
     }
 
-    private void ReplaceNodeWithStatic(Node node, StaticBlock prefab)
+    private void ReplaceNodeWithStatic(Node node, StaticBlock prefab, bool animate = false)
     {
         if (node == null || prefab == null)
         {
@@ -2578,14 +2804,26 @@ public class BlockManager : MonoBehaviour
         Block current = node.OccupiedBlock;
         if (current != null)
         {
-            node.OccupiedBlock = null;
-            ReleaseBlock(current);
+            if (animate)
+            {
+                AnimateBlockConversion(current, node);
+            }
+            else
+            {
+                node.OccupiedBlock = null;
+                ReleaseBlock(current);
+            }
         }
 
         StaticBlock spawned = SpawnStaticBlockInstance(prefab, node);
         if (spawned == null)
         {
             return;
+        }
+
+        if (animate)
+        {
+            AnimateStaticSpawn(spawned);
         }
 
         int index = boardModel.Index(node.gridPosition.x, node.gridPosition.y);
@@ -2775,19 +3013,24 @@ public class BlockManager : MonoBehaviour
             return false;
         }
 
-        RemoveStaticBlockAt(index);
-        return true;
+        return RemoveStaticBlockAt(index);
     }
 
-    private void RemoveStaticBlockAt(int index)
+    private bool RemoveStaticBlockAt(int index)
     {
         if (!staticTargetIndices.Contains(index))
         {
-            return;
+            return false;
         }
 
         Node node = GetNodeFromIndex(index);
         StaticBlock staticBlock = node?.OccupiedBlock as StaticBlock;
+
+        if (staticBlock != null && staticBlock.HasIceBarrier)
+        {
+            staticBlock.TryDamageIce();
+            return false;
+        }
 
         if (node != null && staticBlock != null)
         {
@@ -2807,6 +3050,7 @@ public class BlockManager : MonoBehaviour
 
         ClearModelCell(index);
         staticTargetIndices.Remove(index);
+        return true;
     }
 
     private void CheckObjectiveAlmostDoneProgress()
@@ -2892,6 +3136,42 @@ public class BlockManager : MonoBehaviour
                 .SetLoops(-1, LoopType.Yoyo)
                 .SetTarget(target);
         }
+    }
+
+    private void AnimateBlockConversion(Block block, Node node)
+    {
+        if (block == null)
+        {
+            return;
+        }
+
+        Transform target = block.transform;
+        DOTween.Kill(target);
+        if (node != null && node.OccupiedBlock == block)
+        {
+            node.OccupiedBlock = null;
+        }
+
+        block.node = null;
+        target.DOScale(Vector3.zero, SpecialSpawnScaleDuration)
+            .SetEase(Ease.InBack)
+            .SetTarget(target)
+            .OnComplete(() => ReleaseBlock(block));
+    }
+
+    private void AnimateStaticSpawn(StaticBlock block)
+    {
+        if (block == null)
+        {
+            return;
+        }
+
+        Transform target = block.transform;
+        DOTween.Kill(target);
+        target.localScale = Vector3.zero;
+        target.DOScale(block.BaseLocalScale, SpecialSpawnScaleDuration)
+            .SetEase(Ease.OutBack)
+            .SetTarget(target);
     }
 
     

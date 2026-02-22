@@ -28,13 +28,13 @@ public class LilStateMachine : MonoBehaviour
         LevelBeginning,
         Waiting,
         Humiliation,
-        Manipulation,
+        ManipulationOne,
+        ManipulationTwo,
         Win,
         Lose
     }
 
     [SerializeField] private Animator animator;
-    [SerializeField] private AudioSource speechAudioSource;
     [SerializeField] private TMP_Text speechLabel;
     [SerializeField] private List<StateDefinition> stateDefinitions = new List<StateDefinition>();
     [SerializeField] private float speechLabelAutoClearDelay = 3f;
@@ -66,11 +66,6 @@ public class LilStateMachine : MonoBehaviour
         if (animator == null)
         {
             animator = GetComponentInChildren<Animator>();
-        }
-
-        if (speechAudioSource == null)
-        {
-            speechAudioSource = GetComponentInChildren<AudioSource>();
         }
     }
 
@@ -137,21 +132,27 @@ public class LilStateMachine : MonoBehaviour
 
     private void PlaySpeech(StateDefinition definition)
     {
-        if (speechAudioSource == null || definition.speechClips == null || definition.speechClips.Length == 0)
+        AudioManager audio = AudioManager.Instance;
+        if (audio == null)
         {
             return;
         }
 
-        var clipIndex = UnityEngine.Random.Range(0, definition.speechClips.Length);
-        var clip = definition.speechClips[clipIndex];
+        if (definition.speechClips == null || definition.speechClips.Length == 0)
+        {
+            audio.StopLilSpeech();
+            return;
+        }
+
+        int clipIndex = UnityEngine.Random.Range(0, definition.speechClips.Length);
+        AudioClip clip = definition.speechClips[clipIndex];
         if (clip == null)
         {
+            audio.StopLilSpeech();
             return;
         }
 
-        speechAudioSource.Stop();
-        speechAudioSource.clip = clip;
-        speechAudioSource.Play();
+        audio.PlayLilSpeech(clip);
     }
 
     private void ShowSpeechText(StateDefinition definition)
