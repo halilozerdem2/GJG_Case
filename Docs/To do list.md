@@ -51,6 +51,23 @@
 - [x] **Shuffle Scale Drift**
   - Repeatedly pressing Shuffle while animations play leaves blocks progressively smaller once they settle back, accumulating scale loss over time.
 
+## Yeni Özellik — Özel Blok Çiftleri Etki Alanları
+
+- [ ] Her özel blok ikilisi için yeni etki alanlarını tanımla; tasarım kararlarını aldıktan sonra BlockManager içindeki temizlemeyi/refactor adımlarını planla.
+- [ ] Etki alanı tanımlarına göre özel-özel birleşimlerin tetiklediği animasyon ve temizleme davranışlarını yeniden kurgula (tanımlar sizden geldikçe doldurulacak).
+
+### İkililer (etki alanı tanımı bekleniyor)
+- [x] RowClear (Yatay Roket) + RowClear (Yatay Roket) — biri yatay biri dikey olacak şekilde aynı turda iki eksende süpürme yapacak özel alan.
+- [x] RowClear (Yatay Roket) + ColumnClear (Dikey Roket) — ekstra etki yok, mevcut satır/sütun temizliğini aynı anda tetikler.
+- [x] RowClear (Yatay Roket) + Bomb2x2 (Bomba) — RowClear’ın bulunduğu satıra ek olarak 1 üst ve 1 alt satırı da temizleyerek 3 satırlık patlama yaratır.
+- [x] RowClear (Yatay Roket) + ColorClear (Color Bomb) — ColorClear hedefini kendi renginden RowClear efektine çevirip tahtada yeni özel blok zincirleri üretir.
+- [ ] ColumnClear (Dikey Roket) + ColumnClear (Dikey Roket)
+- [x] ColumnClear (Dikey Roket) + Bomb2x2 (Bomba) — hedef sütuna ek olarak 1 sağ ve 1 sol sütunu da kapsayan 3 sütunluk patlama uygular.
+- [x] ColumnClear (Dikey Roket) + ColorClear (Color Bomb) — ColorClear eşleştiği özel bloğun efektini alır; bu senaryoda kolon temizliğini genişletir veya (ör: bomba) yarıçapı 2x’e çıkarır.
+- [ ] Bomb2x2 (Bomba) + Bomb2x2 (Bomba)
+- [x] Bomb2x2 (Bomba) + ColorClear (Color Bomb) — ColorClear bomba davranışını devralır ve anlattığımız güçlendirilmiş yarıçap kuralıyla tetikler.
+- [x] ColorClear (Color Bomb) + ColorClear (Color Bomb) — tüm tahtayı temizler.
+
 ## Phase 2 — Performance-First Refactor (Next Iteration)
 
 ### Phase 2 Performans Hedefleri

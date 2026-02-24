@@ -34,8 +34,41 @@ public class MainMenuCanvasController : MonoBehaviour
 
     public void HandlePlayButtonClicked()
     {
-        // Ignore dropdown/game mode; directly load the play scene
+        PrepareLevelForPlay();
         LoadScene(playSceneIndex);
+    }
+
+    private void PrepareLevelForPlay()
+    {
+        var manager = GameManager.Instance;
+        if (manager == null)
+        {
+            Debug.LogWarning("HandlePlayButtonClicked requested level load but no GameManager instance was found.");
+            return;
+        }
+
+        int targetLevel = ResolveResumeLevel();
+        if (manager.TryPrepareLevel(targetLevel))
+        {
+            return;
+        }
+
+        if (targetLevel > 1)
+        {
+            manager.TryPrepareLevel(1);
+        }
+    }
+
+    private int ResolveResumeLevel()
+    {
+        var progress = LevelProgressService.Instance;
+        if (progress == null)
+        {
+            return 1;
+        }
+
+        int highestUnlocked = progress.GetHighestUnlockedLevel();
+        return Mathf.Max(1, highestUnlocked);
     }
 
     private void LoadScene(int buildIndex)

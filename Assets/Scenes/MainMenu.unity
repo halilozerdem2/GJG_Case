@@ -3960,7 +3960,7 @@ MonoBehaviour:
   - sceneName: Case
     clip: {fileID: 8300000, guid: 22b484a91d2c44ca79fbdbe21f3d4a08, type: 3}
   - sceneName: Game Scene
-    clip: {fileID: 8300000, guid: 95de27468dd1d418182f490d0fe8b8f9, type: 3}
+    clip: {fileID: 8300000, guid: 512ad1b3d099f4c4ca9a36feeb03377b, type: 3}
   - sceneName: MainMenu
     clip: {fileID: 8300000, guid: ccbde5a79a4c34176a7c550945aebfbc, type: 3}
   invalidSelectionClip: {fileID: 8300000, guid: ea544f3a0576b4dbbae051222626d8ad, type: 3}

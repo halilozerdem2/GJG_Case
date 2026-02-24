@@ -32,6 +32,11 @@ public class GameManager : MonoBehaviour
     private bool nearFailMovesRaised;
     private bool objectivesComplete = true;
     private int currentLevelNumber = 1;
+    [SerializeField, Min(0f)] private float endGameRocketDelay = 0.4f;
+    private LevelEndResult pendingEndResult = LevelEndResult.Win;
+    private Coroutine endGameRoutine;
+    private bool endGameStartQueued;
+    private bool winResultsSubmitted;
 
     public GameMode CurrentGameMode => _currentGameMode;
     public bool IsCaseMode => _currentGameMode == GameMode.Case;
@@ -89,12 +94,18 @@ public class GameManager : MonoBehaviour
     private void ChangeState(GameState newState)
     {
         var previous = _state;
+        if (_state == GameState.EndGame && newState != GameState.Win && newState != GameState.Lose)
+        {
+            return;
+        }
+
         if (IsTerminalGameState(_state))
         {
             return;
         }
 
         _state = newState;
+        Debug.Log($"[GameManager] State changed: {previous} -> {_state}");
         StateChanged?.Invoke(_state);
         switch (newState)
         {
@@ -128,6 +139,14 @@ public class GameManager : MonoBehaviour
                 GameEventBus.RaiseDeadlock();
                 blockManager.ResolveDeadlock(HandleDeadlockResolved);
                 break;
+            case GameState.EndGame:
+                StopLimitTimer();
+                if (endGameRoutine != null)
+                {
+                    StopCoroutine(endGameRoutine);
+                }
+                endGameRoutine = StartCoroutine(RunEndGameSequence());
+                break;
             case GameState.Win:
                 GameEventBus.RaiseLevelEnd(LevelEndResult.Win);
                 StopLimitTimer();
@@ -144,6 +163,8 @@ public class GameManager : MonoBehaviour
                 Debug.LogWarning($"Unhandled state transition: {newState}");
                 break;
         }
+
+        TryStartQueuedEndGameSequence();
     }
 
     public void SetGameMode(GameMode mode)
@@ -270,6 +291,7 @@ public class GameManager : MonoBehaviour
         BlastAnimation,
         Falling,
         Deadlock,
+        EndGame,
         Win,
         Lose,
         Pause
@@ -388,6 +410,7 @@ public class GameManager : MonoBehaviour
         TimeChanged?.Invoke(remainingTime, maxTime);
 
         objectivesComplete = true;
+        winResultsSubmitted = false;
 
         nearFailTimeRaised = false;
         nearFailMovesRaised = false;
@@ -504,26 +527,141 @@ public class GameManager : MonoBehaviour
 
     public void TriggerWinState()
     {
-        if (_state == GameState.Win)
+        if (_state == GameState.Win || (_state == GameState.EndGame && pendingEndResult == LevelEndResult.Win))
         {
             return;
         }
 
-        ChangeState(GameState.Win);
+        if (!winResultsSubmitted)
+        {
+            int stars = CalculateStarsForWin();
+            ReportLevelCompleted(stars);
+            winResultsSubmitted = true;
+        }
 
-        // Compute stars based on resource usage and persist progress
-        int stars = CalculateStarsForWin();
-        ReportLevelCompleted(stars);
+        BeginEndGameSequence(LevelEndResult.Win);
     }
 
     public void TriggerLoseState()
     {
-        if (_state == GameState.Lose)
+        if (_state == GameState.Lose || (_state == GameState.EndGame && pendingEndResult == LevelEndResult.Lose))
         {
             return;
         }
 
-        ChangeState(GameState.Lose);
+        BeginEndGameSequence(LevelEndResult.Lose);
+    }
+
+    private void BeginEndGameSequence(LevelEndResult result)
+    {
+        pendingEndResult = result;
+        endGameStartQueued = true;
+
+        if (blockManager != null)
+        {
+            blockManager.WaitForBlastAnimations(TryStartQueuedEndGameSequence);
+        }
+        else
+        {
+            TryStartQueuedEndGameSequence();
+        }
+    }
+
+    private void TryStartQueuedEndGameSequence()
+    {
+        if (!endGameStartQueued)
+        {
+            return;
+        }
+
+        if (_state == GameState.EndGame || IsTerminalGameState(_state))
+        {
+            return;
+        }
+
+        switch (_state)
+        {
+            case GameState.BlastAnimation:
+            case GameState.Falling:
+            case GameState.SpawningBlocks:
+            case GameState.Deadlock:
+                return;
+        }
+
+        endGameStartQueued = false;
+        ChangeState(GameState.EndGame);
+    }
+
+    private IEnumerator RunEndGameSequence()
+    {
+        LevelEndResult result = pendingEndResult;
+        AudioManager audio = AudioManager.Instance;
+        if (result == LevelEndResult.Win)
+        {
+            audio?.PlayWin();
+        }
+        else
+        {
+            audio?.PlayLose();
+        }
+
+        int rocketBudget = useMoveLimit ? Mathf.Max(0, remainingMoves) : 0;
+        if (useMoveLimit && maxMoves > 0)
+        {
+            remainingMoves = 0;
+            MovesChanged?.Invoke(remainingMoves, maxMoves);
+        }
+
+        float interval = Mathf.Max(0f, endGameRocketDelay);
+        if (blockManager != null && rocketBudget > 0)
+        {
+            bool firedAnyRocket = false;
+            for (int i = 0; i < rocketBudget; i++)
+            {
+                bool spawned = blockManager.TrySpawnEndGameRocket();
+                if (!spawned)
+                {
+                    break;
+                }
+
+                firedAnyRocket = true;
+
+                if (interval > 0f)
+                {
+                    yield return new WaitForSeconds(interval);
+                }
+                else
+                {
+                    yield return null;
+                }
+            }
+
+            if (!firedAnyRocket)
+            {
+                if (interval > 0f)
+                {
+                    yield return new WaitForSeconds(interval);
+                }
+                else
+                {
+                    yield return null;
+                }
+            }
+        }
+        else
+        {
+            if (interval > 0f)
+            {
+                yield return new WaitForSeconds(interval);
+            }
+            else
+            {
+                yield return null;
+            }
+        }
+
+        ChangeState(result == LevelEndResult.Win ? GameState.Win : GameState.Lose);
+        endGameRoutine = null;
     }
 
     public void SetActiveLevelConfig(GameModeConfig config)
@@ -543,12 +681,7 @@ public class GameManager : MonoBehaviour
         // Prefer per-level config under Resources/Levels/Level_XX/GameModeConfig
         if (mode != GameMode.Case && CurrentLevelNumber > 0)
         {
-            string levelPath = $"Levels/Level_{CurrentLevelNumber:D2}/GameModeConfig";
-            config = Resources.Load<GameModeConfig>(levelPath);
-            if (config == null)
-            {
-                Debug.LogWarning($"Unable to load per-level GameModeConfig at Resources/{levelPath}.");
-            }
+            config = LoadLevelConfig(CurrentLevelNumber);
         }
 
         _activeGameModeConfig = config;
@@ -587,6 +720,37 @@ public class GameManager : MonoBehaviour
     public void SetCurrentLevelNumber(int levelNumber)
     {
         currentLevelNumber = Mathf.Max(1, levelNumber);
+    }
+
+    public bool TryPrepareLevel(int levelNumber)
+    {
+        int targetLevel = Mathf.Max(1, levelNumber);
+        var config = LoadLevelConfig(targetLevel);
+        if (config == null)
+        {
+            return false;
+        }
+
+        SetCurrentLevelNumber(targetLevel);
+        SetActiveLevelConfig(config);
+        return true;
+    }
+
+    private GameModeConfig LoadLevelConfig(int levelNumber)
+    {
+        if (levelNumber <= 0)
+        {
+            return null;
+        }
+
+        string levelPath = $"Levels/Level_{levelNumber:D2}/GameModeConfig";
+        var config = Resources.Load<GameModeConfig>(levelPath);
+        if (config == null)
+        {
+            Debug.LogWarning($"Unable to load per-level GameModeConfig at Resources/{levelPath}.");
+        }
+
+        return config;
     }
 
     public void ReportLevelCompleted(int stars)

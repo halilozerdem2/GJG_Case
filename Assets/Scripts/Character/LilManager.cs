@@ -172,6 +172,12 @@ public class LilManager : MonoBehaviour
                     StartManipulationLoop();
                 }
                 break;
+            case GameManager.GameState.EndGame:
+                CancelIntroSequence();
+                CancelTransientStateRoutine();
+                StopManipulationLoop();
+                stateMachine.EnterState(LilStateMachine.LilState.Waiting, true);
+                break;
             case GameManager.GameState.Win:
                 CancelIntroSequence();
                 CancelTransientStateRoutine();

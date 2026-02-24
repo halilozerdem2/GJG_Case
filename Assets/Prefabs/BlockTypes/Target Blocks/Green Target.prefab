@@ -157,7 +157,7 @@ MonoBehaviour:
   blockType: 11
   archetype: 5
   spriteRenderer: {fileID: 799185347408549920}
-  defaultIcon: {fileID: 21300000, guid: 8e4d7a214497dde499c3e359c7823b3f, type: 3}
+  defaultIcon: {fileID: 21300000, guid: 28b39fc859926a74f899a9fb2115b9f6, type: 3}
   baseLocalScale: {x: 0.25, y: 0.25, z: 0.54038}
   staticBlastEffect: {fileID: 3788187274286152095, guid: 2a62300df2ab54c6bbdf45cdcf4cbbdc, type: 3}
   iceBlock: {fileID: 7589583733120880651}

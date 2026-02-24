@@ -187,6 +187,7 @@ public class ObjectiveController : MonoBehaviour
             gameManager.SetObjectivesPending(pendingTargets);
             if (!pendingTargets && targetProgressLookup.Count > 0 && wasPending)
             {
+                Debug.Log("[ObjectiveController] All objectives complete → triggering win.");
                 gameManager.ReportObjectivesCompletion();
             }
         }

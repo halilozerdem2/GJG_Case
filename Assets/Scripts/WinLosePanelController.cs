@@ -78,6 +78,27 @@ public class WinLosePanelController : MonoBehaviour
         manager.ReturnToMainMenu();
     }
 
+    public void NextLevel()
+    {
+        HidePanels();
+        var manager = GameManager.Instance;
+        if (manager == null)
+        {
+            Debug.LogWarning("NextLevel requested but no GameManager instance was found.");
+            return;
+        }
+
+        int nextLevel = manager.CurrentLevelNumber + 1;
+        if (!manager.TryPrepareLevel(nextLevel))
+        {
+            Debug.LogWarning($"NextLevel requested but no configuration was found for Level {nextLevel}. Returning to main menu.");
+            manager.ReturnToMainMenu();
+            return;
+        }
+
+        manager.RetryCurrentLevel();
+    }
+
     private void SetPanelStates(bool winActive, bool loseActive)
     {
         if (winPanel != null)

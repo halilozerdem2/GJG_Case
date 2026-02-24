@@ -36,6 +36,7 @@ public class ColorClearBlock : SpecialBlock
     public float BeamTravelSpeed => Mathf.Max(0.01f, beamTravelSpeed);
     public float BeamCompletionDelay => Mathf.Max(0f, beamCompletionDelay);
     public float BeamLineWidth => Mathf.Max(0.01f, beamLineWidth);
+    public byte TargetColorId => targetColorId;
 
     public void ConfigureTargetColor(int sourceBlockType)
     {

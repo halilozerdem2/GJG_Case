@@ -43,6 +43,8 @@ public class BlockManager : MonoBehaviour
     private const float SpecialSpawnScaleDuration = 0.25f;
     private const float SpecialPulseDuration = 0.65f;
     private const float SpecialPulseMultiplier = 1.2f;
+    private const int BombComboRadiusMultiplier = 2;
+    private const float ColorComboActivationDelay = 0.5f;
     private readonly List<BlockMove> blockMoves = new List<BlockMove>(64);
     private readonly List<int> pendingSpawnIndices = new List<int>(64);
     private readonly List<BlockAnimation> activeAnimations = new List<BlockAnimation>(128);
@@ -60,6 +62,9 @@ public class BlockManager : MonoBehaviour
     private readonly HashSet<int> processedClearIndices = new HashSet<int>();
     private readonly Stack<int[]> chainBufferPool = new Stack<int[]>();
     private readonly List<SpecialClearEntry> pendingSpecialClears = new List<SpecialClearEntry>(8);
+    private readonly HashSet<int> comboIndexBuffer = new HashSet<int>();
+    private readonly List<Block> comboSpawnBuffer = new List<Block>(32);
+    private readonly Block[] comboNeighbourBuffer = new Block[4];
     private readonly HashSet<int> staticTargetIndices = new HashSet<int>();
     private readonly HashSet<int> pendingStaticRemovalIndices = new HashSet<int>();
     private readonly HashSet<int> staticPlacementIndexLookup = new HashSet<int>();
@@ -192,7 +197,7 @@ public class BlockManager : MonoBehaviour
 
         if (block.IsSpecialVariant)
         {
-            bool activated = TryExecuteSpecialBlock(block);
+            bool activated = TryExecuteSpecialBlock(block, true);
             if (activated)
             {
                 return true;
@@ -255,8 +260,18 @@ public class BlockManager : MonoBehaviour
         blastAnimationCompletion += onComplete;
     }
 
-    private bool TryExecuteSpecialBlock(Block block)
+    private bool TryExecuteSpecialBlock(Block block, bool allowCombos = true)
     {
+        if (block == null)
+        {
+            return false;
+        }
+
+        if (allowCombos && TryExecuteSpecialCombo(block))
+        {
+            return true;
+        }
+
         if (!TryBuildSearchData(block, out BlockSearchData searchData))
         {
             return false;
@@ -270,6 +285,826 @@ public class BlockManager : MonoBehaviour
 
         GroupContext context = new GroupContext(block, groupIndicesBuffer, count, block.blockType);
         return ExecuteBlast(context, null, false, true, false);
+    }
+
+    private bool TryExecuteSpecialCombo(Block block)
+    {
+        if (block == null || gridManager == null || boardModel == null)
+        {
+            return false;
+        }
+
+        Node[,] nodeGrid = gridManager.NodeGrid;
+        Node centerNode = block.node;
+        if (nodeGrid == null || centerNode == null)
+        {
+            return false;
+        }
+
+        int neighbourCount = CollectSpecialNeighbours(block, nodeGrid, comboNeighbourBuffer);
+        if (neighbourCount == 0)
+        {
+            return false;
+        }
+
+        if (block.Archetype == Block.BlockArchetype.ColorClear)
+        {
+            var colorClear = block as ColorClearBlock;
+            for (int i = 0; i < neighbourCount; i++)
+            {
+                Block candidate = comboNeighbourBuffer[i];
+                if (TryExecuteColorClearCombo(colorClear, candidate))
+                {
+                    return true;
+                }
+            }
+        }
+
+        for (int i = 0; i < neighbourCount; i++)
+        {
+            Block candidate = comboNeighbourBuffer[i];
+            if (candidate != null && candidate.Archetype == Block.BlockArchetype.ColorClear)
+            {
+                if (TryExecuteColorClearCombo(candidate as ColorClearBlock, block))
+                {
+                    return true;
+                }
+            }
+        }
+
+        for (int i = 0; i < neighbourCount; i++)
+        {
+            Block candidate = comboNeighbourBuffer[i];
+            if (TryExecuteRegularSpecialCombo(block, candidate))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private int CollectSpecialNeighbours(Block block, Node[,] nodeGrid, Block[] buffer)
+    {
+        if (block == null || buffer == null)
+        {
+            return 0;
+        }
+
+        Node centerNode = block.node;
+        if (centerNode == null)
+        {
+            return 0;
+        }
+
+        int columns = nodeGrid.GetLength(0);
+        int rows = nodeGrid.GetLength(1);
+        Vector2Int gridPos = centerNode.gridPosition;
+        int count = 0;
+
+        void TryStore(int x, int y)
+        {
+            if (x < 0 || y < 0 || x >= columns || y >= rows)
+            {
+                return;
+            }
+
+            Node neighbourNode = nodeGrid[x, y];
+            Block candidate = neighbourNode != null ? neighbourNode.OccupiedBlock : null;
+            if (candidate == null || candidate == block || !candidate.IsSpecialVariant || candidate.Archetype == Block.BlockArchetype.Static)
+            {
+                return;
+            }
+
+            buffer[count++] = candidate;
+        }
+
+        TryStore(gridPos.x + 1, gridPos.y);
+        TryStore(gridPos.x - 1, gridPos.y);
+        TryStore(gridPos.x, gridPos.y + 1);
+        TryStore(gridPos.x, gridPos.y - 1);
+        return count;
+    }
+
+    private bool TryExecuteRegularSpecialCombo(Block first, Block second)
+    {
+        if (first == null || second == null)
+        {
+            return false;
+        }
+
+        switch (first.Archetype)
+        {
+            case Block.BlockArchetype.RowClear when second.Archetype == Block.BlockArchetype.RowClear:
+                return ExecuteRowRowCombo(first, second);
+            case Block.BlockArchetype.RowClear when second.Archetype == Block.BlockArchetype.ColumnClear:
+                return ExecuteRowColumnCombo(first, second);
+            case Block.BlockArchetype.ColumnClear when second.Archetype == Block.BlockArchetype.RowClear:
+                return ExecuteRowColumnCombo(second, first);
+            case Block.BlockArchetype.RowClear when second.Archetype == Block.BlockArchetype.Bomb2x2:
+                return ExecuteRowBombCombo(first, second);
+            case Block.BlockArchetype.Bomb2x2 when second.Archetype == Block.BlockArchetype.RowClear:
+                return ExecuteRowBombCombo(second, first);
+            case Block.BlockArchetype.ColumnClear when second.Archetype == Block.BlockArchetype.Bomb2x2:
+                return ExecuteColumnBombCombo(first, second);
+            case Block.BlockArchetype.Bomb2x2 when second.Archetype == Block.BlockArchetype.ColumnClear:
+                return ExecuteColumnBombCombo(second, first);
+        }
+
+        if (first.Archetype == Block.BlockArchetype.ColorClear || second.Archetype == Block.BlockArchetype.ColorClear)
+        {
+            return false;
+        }
+
+        return false;
+    }
+
+    private bool ExecuteRowRowCombo(Block rowBlock, Block partner)
+    {
+        if (rowBlock?.node == null || partner?.node == null)
+        {
+            return false;
+        }
+
+        Vector2Int rowPosition = rowBlock.node.gridPosition;
+        Vector2Int partnerPosition = partner.node.gridPosition;
+        return ExecuteComboClear(rowBlock, partner, (ref int count) =>
+        {
+            AppendRowIndices(rowPosition.y, ref count);
+            AppendColumnIndices(partnerPosition.x, ref count);
+        });
+    }
+
+    private bool ExecuteRowColumnCombo(Block rowBlock, Block columnBlock)
+    {
+        if (rowBlock?.node == null || columnBlock?.node == null)
+        {
+            return false;
+        }
+
+        int row = rowBlock.node.gridPosition.y;
+        int column = columnBlock.node.gridPosition.x;
+        return ExecuteComboClear(rowBlock, columnBlock, (ref int count) =>
+        {
+            AppendRowIndices(row, ref count);
+            AppendColumnIndices(column, ref count);
+        });
+    }
+
+    private bool ExecuteRowBombCombo(Block rowBlock, Block bombBlock)
+    {
+        if (rowBlock?.node == null)
+        {
+            return false;
+        }
+
+        int row = rowBlock.node.gridPosition.y;
+        return ExecuteComboClear(rowBlock, bombBlock, (ref int count) =>
+        {
+            AppendRowIndices(row - 1, ref count);
+            AppendRowIndices(row, ref count);
+            AppendRowIndices(row + 1, ref count);
+        });
+    }
+
+    private bool ExecuteColumnBombCombo(Block columnBlock, Block bombBlock)
+    {
+        if (columnBlock?.node == null)
+        {
+            return false;
+        }
+
+        int column = columnBlock.node.gridPosition.x;
+        return ExecuteComboClear(columnBlock, bombBlock, (ref int count) =>
+        {
+            AppendColumnIndices(column - 1, ref count);
+            AppendColumnIndices(column, ref count);
+            AppendColumnIndices(column + 1, ref count);
+        });
+    }
+
+    private delegate void ComboFillDelegate(ref int count);
+
+    private bool ExecuteComboClear(Block activator, Block partner, ComboFillDelegate fillAction)
+    {
+        if (activator == null || activator.node == null || boardModel == null || fillAction == null)
+        {
+            return false;
+        }
+
+        EnsureGroupBuffers();
+        comboIndexBuffer.Clear();
+        int count = 0;
+        fillAction(ref count);
+        if (count <= 0)
+        {
+            return false;
+        }
+
+        TriggerSpecialActivationFeedback(activator);
+        if (partner != null)
+        {
+            TriggerSpecialActivationFeedback(partner);
+        }
+
+        GroupContext context = new GroupContext(activator, groupIndicesBuffer, count, activator.blockType);
+        return ExecuteBlast(context, activator.node, false, false, true);
+    }
+
+    private void AppendRowIndices(int row, ref int count)
+    {
+        if (boardModel == null)
+        {
+            return;
+        }
+
+        int rows = boardModel.Rows;
+        int columns = boardModel.Columns;
+        if (row < 0 || row >= rows || columns <= 0)
+        {
+            return;
+        }
+
+        for (int x = 0; x < columns; x++)
+        {
+            int index = boardModel.Index(x, row);
+            AddComboIndex(index, ref count);
+        }
+    }
+
+    private void AppendColumnIndices(int column, ref int count)
+    {
+        if (boardModel == null)
+        {
+            return;
+        }
+
+        int rows = boardModel.Rows;
+        int columns = boardModel.Columns;
+        if (column < 0 || column >= columns || rows <= 0)
+        {
+            return;
+        }
+
+        for (int y = 0; y < rows; y++)
+        {
+            int index = boardModel.Index(column, y);
+            AddComboIndex(index, ref count);
+        }
+    }
+
+    private void AppendBoardIndices(ref int count)
+    {
+        if (boardModel == null)
+        {
+            return;
+        }
+
+        int total = boardModel.CellCount;
+        for (int i = 0; i < total; i++)
+        {
+            AddComboIndex(i, ref count);
+        }
+    }
+
+    private void AppendBombArea(Vector2Int center, int radius, ref int count)
+    {
+        if (boardModel == null)
+        {
+            return;
+        }
+
+        int columns = boardModel.Columns;
+        int rows = boardModel.Rows;
+        radius = Mathf.Max(0, radius);
+
+        for (int x = center.x - radius; x <= center.x + radius; x++)
+        {
+            if (x < 0 || x >= columns)
+            {
+                continue;
+            }
+
+            for (int y = center.y - radius; y <= center.y + radius; y++)
+            {
+                if (y < 0 || y >= rows)
+                {
+                    continue;
+                }
+
+                int index = boardModel.Index(x, y);
+                AddComboIndex(index, ref count);
+            }
+        }
+    }
+
+    private void AddComboIndex(int index, ref int count)
+    {
+        if (index < 0 || groupIndicesBuffer == null)
+        {
+            return;
+        }
+
+        if (!comboIndexBuffer.Add(index))
+        {
+            return;
+        }
+
+        groupIndicesBuffer[count++] = index;
+    }
+
+    private bool TryExecuteColorClearCombo(ColorClearBlock colorClear, Block partner)
+    {
+        if (colorClear == null || partner == null)
+        {
+            return false;
+        }
+
+        switch (partner.Archetype)
+        {
+            case Block.BlockArchetype.ColorClear:
+                return ExecuteDoubleColorClear(colorClear, partner as ColorClearBlock);
+            case Block.BlockArchetype.RowClear:
+                return ExecuteColorWithStripedCombo(colorClear, partner, Block.BlockArchetype.RowClear);
+            case Block.BlockArchetype.ColumnClear:
+                return ExecuteColorWithStripedCombo(colorClear, partner, Block.BlockArchetype.ColumnClear);
+            case Block.BlockArchetype.Bomb2x2:
+                return ExecuteColorWithBombCombo(colorClear, partner);
+            default:
+                return false;
+        }
+    }
+
+    private bool ExecuteColorWithStripedCombo(ColorClearBlock colorClear, Block partner, Block.BlockArchetype targetArchetype)
+    {
+        byte targetColor = ResolveColorTarget(colorClear);
+        if (targetColor == BoardModel.EmptyColorId)
+        {
+            return false;
+        }
+
+        int partnerBlockType = partner != null ? partner.blockType : -1;
+        ColorComboVisualSettings visualSettings = CaptureColorComboVisualSettings(colorClear);
+        TriggerSpecialActivationFeedback(colorClear);
+        TriggerSpecialActivationFeedback(partner);
+        RemoveSpecialComboSources(colorClear, partner);
+
+        comboSpawnBuffer.Clear();
+        List<Vector3> lineTargets = new List<Vector3>();
+        int cellCount = boardModel.CellCount;
+        for (int i = 0; i < cellCount; i++)
+        {
+            Cell cell = boardModel.GetCell(i);
+            if (!cell.occupied || cell.colorId != targetColor)
+            {
+                continue;
+            }
+
+            Node node = GetNodeFromIndex(i);
+            Block occupant = node != null ? node.OccupiedBlock : null;
+            if (occupant == null || occupant.IsSpecialVariant || occupant is StaticBlock)
+            {
+                continue;
+            }
+
+            Block spawned = ReplaceBlockWithSpecial(node, occupant, targetArchetype, partnerBlockType);
+            if (spawned != null)
+            {
+                comboSpawnBuffer.Add(spawned);
+                lineTargets.Add(spawned.transform.position);
+            }
+        }
+
+        if (comboSpawnBuffer.Count == 0)
+        {
+            comboSpawnBuffer.Clear();
+            return true;
+        }
+
+        List<Block> pendingBlocks = new List<Block>(comboSpawnBuffer);
+        comboSpawnBuffer.Clear();
+        Vector3[] targetPositions = lineTargets.ToArray();
+        BeginColorComboVisualSequence(visualSettings, targetPositions, () =>
+        {
+            ActivateConvertedStripedBlocks(pendingBlocks);
+        });
+        return true;
+    }
+
+    private bool ExecuteColorWithBombCombo(ColorClearBlock colorClear, Block partner)
+    {
+        byte targetColor = ResolveColorTarget(colorClear);
+        if (targetColor == BoardModel.EmptyColorId)
+        {
+            return false;
+        }
+
+        int partnerBlockType = partner != null ? partner.blockType : -1;
+        ColorComboVisualSettings visualSettings = CaptureColorComboVisualSettings(colorClear);
+        TriggerSpecialActivationFeedback(colorClear);
+        TriggerSpecialActivationFeedback(partner);
+        RemoveSpecialComboSources(colorClear, partner);
+
+        comboSpawnBuffer.Clear();
+        List<Vector3> lineTargets = new List<Vector3>();
+        int cellCount = boardModel.CellCount;
+        for (int i = 0; i < cellCount; i++)
+        {
+            Cell cell = boardModel.GetCell(i);
+            if (!cell.occupied || cell.colorId != targetColor)
+            {
+                continue;
+            }
+
+            Node node = GetNodeFromIndex(i);
+            Block occupant = node != null ? node.OccupiedBlock : null;
+            if (occupant == null || occupant.IsSpecialVariant || occupant is StaticBlock)
+            {
+                continue;
+            }
+
+            Block spawned = ReplaceBlockWithSpecial(node, occupant, Block.BlockArchetype.Bomb2x2, partnerBlockType);
+            if (spawned != null)
+            {
+                comboSpawnBuffer.Add(spawned);
+                lineTargets.Add(spawned.transform.position);
+            }
+        }
+
+        if (comboSpawnBuffer.Count == 0)
+        {
+            comboSpawnBuffer.Clear();
+            return true;
+        }
+
+        List<Block> pendingBombBlocks = new List<Block>(comboSpawnBuffer);
+        comboSpawnBuffer.Clear();
+        Vector3[] targetPositions = lineTargets.ToArray();
+        BeginColorComboVisualSequence(visualSettings, targetPositions, () =>
+        {
+            ActivateConvertedBombBlocks(pendingBombBlocks);
+        });
+        return true;
+    }
+
+    private ColorComboVisualSettings CaptureColorComboVisualSettings(ColorClearBlock colorClear)
+    {
+        if (colorClear == null)
+        {
+            return new ColorComboVisualSettings
+            {
+                Origin = Vector3.zero,
+                BeamColor = Color.white,
+                BeamSpeed = 15f,
+                BeamWidth = 0.1f,
+                CompletionDelay = 0f
+            };
+        }
+
+        return new ColorComboVisualSettings
+        {
+            Origin = colorClear.transform.position,
+            BeamColor = colorClear.BeamColor,
+            BeamSpeed = colorClear.BeamTravelSpeed,
+            BeamWidth = colorClear.BeamLineWidth,
+            CompletionDelay = colorClear.BeamCompletionDelay
+        };
+    }
+
+    private void BeginColorComboVisualSequence(ColorComboVisualSettings settings, Vector3[] targetPositions, Action onComplete)
+    {
+        blastAnimationPending = true;
+        StartCoroutine(PlayColorComboVisualSequence(settings, targetPositions, onComplete));
+    }
+
+    private IEnumerator PlayColorComboVisualSequence(ColorComboVisualSettings settings, Vector3[] targetPositions, Action onComplete)
+    {
+        int targetCount = targetPositions != null ? targetPositions.Length : 0;
+        if (targetCount > 0)
+        {
+            Transform effectRoot = GetBlastEffectRoot();
+            int pendingHits = targetCount;
+            for (int i = 0; i < targetCount; i++)
+            {
+                Vector3 destination = targetPositions[i];
+                ColorClearLineEffect effect = ColorClearLineEffect.Create(effectRoot);
+                effect.Play(settings.Origin, destination, settings.BeamColor, settings.BeamWidth, settings.BeamSpeed, () =>
+                {
+                    pendingHits = Mathf.Max(0, pendingHits - 1);
+                });
+            }
+
+            while (pendingHits > 0)
+            {
+                yield return null;
+            }
+        }
+
+        if (settings.CompletionDelay > 0f)
+        {
+            yield return new WaitForSeconds(settings.CompletionDelay);
+        }
+
+        if (ColorComboActivationDelay > 0f)
+        {
+            yield return new WaitForSeconds(ColorComboActivationDelay);
+        }
+
+        onComplete?.Invoke();
+        NotifyBlastAnimationsComplete();
+    }
+
+    private void ActivateConvertedStripedBlocks(List<Block> blocks)
+    {
+        if (blocks == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < blocks.Count; i++)
+        {
+            Block spawned = blocks[i];
+            if (spawned == null)
+            {
+                continue;
+            }
+
+            TryExecuteSpecialBlock(spawned, false);
+        }
+    }
+
+    private void ActivateConvertedBombBlocks(List<Block> blocks)
+    {
+        if (blocks == null || blocks.Count == 0)
+        {
+            return;
+        }
+
+        EnsureGroupBuffers();
+        comboIndexBuffer.Clear();
+        int count = 0;
+        for (int i = 0; i < blocks.Count; i++)
+        {
+            Block spawned = blocks[i];
+            if (spawned?.node == null)
+            {
+                continue;
+            }
+
+            Vector2Int center = spawned.node.gridPosition;
+            int radius = ResolveBombRadius(spawned) * BombComboRadiusMultiplier;
+            AppendBombArea(center, radius, ref count);
+        }
+
+        if (count <= 0)
+        {
+            return;
+        }
+
+        Block comboOrigin = null;
+        for (int i = 0; i < blocks.Count && comboOrigin == null; i++)
+        {
+            Block candidate = blocks[i];
+            if (candidate?.node != null)
+            {
+                comboOrigin = candidate;
+            }
+        }
+
+        if (comboOrigin == null || comboOrigin.node == null)
+        {
+            return;
+        }
+
+        GroupContext context = new GroupContext(comboOrigin, groupIndicesBuffer, count, comboOrigin.blockType);
+        ExecuteBlast(context, comboOrigin.node, false, false, true);
+    }
+
+    public bool TrySpawnEndGameRocket()
+    {
+        Node targetNode = AcquireRandomRegularNode();
+        if (targetNode == null)
+        {
+            return false;
+        }
+
+        Block occupant = targetNode.OccupiedBlock;
+        if (occupant == null)
+        {
+            return false;
+        }
+
+        Block.BlockArchetype archetype = Random.value < 0.5f
+            ? Block.BlockArchetype.RowClear
+            : Block.BlockArchetype.ColumnClear;
+        int overrideBlockType = ResolveEndGameRocketBlockType(archetype, occupant.blockType);
+        Block spawned = ReplaceBlockWithSpecial(targetNode, occupant, archetype, overrideBlockType);
+        if (spawned == null)
+        {
+            return false;
+        }
+
+        TryExecuteSpecialBlock(spawned, false);
+        return true;
+    }
+
+    private int ResolveEndGameRocketBlockType(Block.BlockArchetype archetype, int fallback)
+    {
+        GameManager manager = GameManager.Instance;
+        GameModeConfig config = manager != null ? manager.ActiveGameModeConfig : null;
+        Block prefab = config?.GetSpecialBlockPrefab(archetype, fallback);
+        if (prefab != null)
+        {
+            return prefab.blockType;
+        }
+
+        switch (archetype)
+        {
+            case Block.BlockArchetype.RowClear:
+                return 6;
+            case Block.BlockArchetype.ColumnClear:
+                return 9;
+            default:
+                return fallback;
+        }
+    }
+
+    private Node AcquireRandomRegularNode()
+    {
+        Node[,] nodeGrid = gridManager?.NodeGrid;
+        if (nodeGrid == null || boardModel == null)
+        {
+            return null;
+        }
+
+        manipulationCandidates.Clear();
+        int columns = boardModel.Columns;
+        int rows = boardModel.Rows;
+        for (int y = 0; y < rows; y++)
+        {
+            for (int x = 0; x < columns; x++)
+            {
+                Node node = nodeGrid[x, y];
+                Block block = node?.OccupiedBlock;
+                if (block == null || block.IsSpecialVariant || block is StaticBlock || !block.CanParticipateInGroup)
+                {
+                    continue;
+                }
+
+                manipulationCandidates.Add(node);
+            }
+        }
+
+        if (manipulationCandidates.Count == 0)
+        {
+            return null;
+        }
+
+        int index = Random.Range(0, manipulationCandidates.Count);
+        Node selected = manipulationCandidates[index];
+        manipulationCandidates.Clear();
+        return selected;
+    }
+
+    private bool ExecuteDoubleColorClear(ColorClearBlock first, ColorClearBlock second)
+    {
+        if (first == null)
+        {
+            return false;
+        }
+
+        TriggerSpecialActivationFeedback(first);
+        if (second != null)
+        {
+            TriggerSpecialActivationFeedback(second);
+        }
+
+        return ExecuteComboClear(first, second, (ref int count) =>
+        {
+            AppendBoardIndices(ref count);
+        });
+    }
+
+    private byte ResolveColorTarget(ColorClearBlock colorClear)
+    {
+        if (colorClear == null)
+        {
+            return BoardModel.EmptyColorId;
+        }
+
+        byte configuredColor = colorClear.TargetColorId;
+        if (configuredColor != BoardModel.EmptyColorId)
+        {
+            return configuredColor;
+        }
+
+        if (boardModel == null)
+        {
+            return BoardModel.EmptyColorId;
+        }
+
+        Node node = colorClear.node;
+        if (node != null)
+        {
+            int index = boardModel.Index(node.gridPosition.x, node.gridPosition.y);
+            if (index >= 0)
+            {
+                Cell cell = boardModel.GetCell(index);
+                if (cell.occupied)
+                {
+                    return cell.colorId;
+                }
+            }
+        }
+
+        return ToColorId(colorClear.blockType);
+    }
+
+    private void RemoveSpecialComboSources(Block first, Block second)
+    {
+        RemoveBlockImmediate(first);
+        if (second != null && second != first)
+        {
+            RemoveBlockImmediate(second);
+        }
+    }
+
+    private void RemoveBlockImmediate(Block block)
+    {
+        if (block == null)
+        {
+            return;
+        }
+
+        Node node = block.node;
+        if (node != null && node.OccupiedBlock == block)
+        {
+            node.OccupiedBlock = null;
+            gridManager?.FreeNodes.Add(node);
+            int index = boardModel?.Index(node.gridPosition.x, node.gridPosition.y) ?? -1;
+            if (index >= 0)
+            {
+                ClearModelCell(index);
+            }
+        }
+
+        block.node = null;
+        PlayBlockBlastEffect(block);
+        ReleaseBlock(block);
+    }
+
+    private Block ReplaceBlockWithSpecial(Node node, Block current, Block.BlockArchetype archetype, int blockTypeOverride = -1)
+    {
+        if (node == null)
+        {
+            return null;
+        }
+
+        int blockType = blockTypeOverride >= 0 ? blockTypeOverride : ResolveComboBlockType(node, current);
+        if (current != null)
+        {
+            if (node.OccupiedBlock == current)
+            {
+                node.OccupiedBlock = null;
+            }
+
+            current.node = null;
+            ReleaseBlock(current);
+        }
+
+        return SpawnBlockOfType(blockType, node, archetype);
+    }
+
+    private int ResolveComboBlockType(Node node, Block current)
+    {
+        if (current != null)
+        {
+            return current.blockType;
+        }
+
+        if (boardModel == null || node == null)
+        {
+            return 0;
+        }
+
+        int index = boardModel.Index(node.gridPosition.x, node.gridPosition.y);
+        if (index < 0)
+        {
+            return 0;
+        }
+
+        Cell cell = boardModel.GetCell(index);
+        return cell.occupied ? cell.colorId : 0;
+    }
+
+    private int ResolveBombRadius(Block block)
+    {
+        if (block is BombBlock bomb)
+        {
+            return Mathf.Max(1, bomb.ExplosionRadius);
+        }
+
+        return 1;
     }
 
     private bool ExecuteBlast(in GroupContext context, Node originNode, bool allowSpecialSpawn, bool activateSpecial, bool allowStaticAdjacency)
@@ -2976,12 +3811,19 @@ public class BlockManager : MonoBehaviour
             return;
         }
 
+        staticTargetKeyBuffer.Clear();
         foreach (int staticIndex in pendingStaticRemovalIndices)
         {
-            RemoveStaticBlockAt(staticIndex);
+            staticTargetKeyBuffer.Add(staticIndex);
+        }
+        pendingStaticRemovalIndices.Clear();
+
+        for (int i = 0; i < staticTargetKeyBuffer.Count; i++)
+        {
+            RemoveStaticBlockAt(staticTargetKeyBuffer[i]);
         }
 
-        pendingStaticRemovalIndices.Clear();
+        staticTargetKeyBuffer.Clear();
     }
 
     private void QueueStaticNeighbour(int x, int y)
@@ -3871,6 +4713,15 @@ public class BlockManager : MonoBehaviour
         OutBounce,
         OutBack,
         OutSine
+    }
+
+    private struct ColorComboVisualSettings
+    {
+        public Vector3 Origin;
+        public Color BeamColor;
+        public float BeamSpeed;
+        public float BeamWidth;
+        public float CompletionDelay;
     }
 
     private struct ColorClearTarget
